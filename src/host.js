@@ -235,13 +235,18 @@ async function handleChromeMessage(message) {
 // ============================================================================
 
 async function main() {
-  // Set stdin to flowing mode
-  process.stdin.setEncoding(null);
+  process.stdin.on("end", () => {
+    log("stdin ended, Chrome disconnected");
+    process.exit(0);
+  });
   
-  // Start MCP socket server
+  process.stdin.on("close", () => {
+    log("stdin closed, Chrome disconnected");
+    process.exit(0);
+  });
+  
   connectToMcpServer();
   
-  // Read messages from Chrome extension
   while (true) {
     try {
       const message = await readMessage();
