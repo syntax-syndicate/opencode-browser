@@ -4,10 +4,9 @@ Browser automation for [OpenCode](https://github.com/opencode-ai/opencode) via C
 
 **Inspired by Claude in Chrome** - Anthropic's browser extension that lets Claude Code test code directly in the browser and see client-side errors via console logs. This project brings similar capabilities to OpenCode.
 
-> "Claude in Chrome runs in a side panel that stays open as you browse, working with your existing logins and bookmarks."
-> — [@claudeai](https://twitter.com/claudeai), Dec 18, 2024
-
 ## Why?
+
+Get access to your fully credentialed chrome instance to perform privileged web operations.
 
 Chrome 136+ blocks `--remote-debugging-port` on your default profile for security reasons. This means DevTools-based automation (like Playwright or chrome-devtools-mcp) triggers a security prompt every time.
 
