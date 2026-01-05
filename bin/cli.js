@@ -102,6 +102,9 @@ ${color("bright", "Usage:")}
   npx @different-ai/opencode-browser start           Run MCP server
   npx @different-ai/opencode-browser uninstall       Remove installation
 
+${color("bright", "With bun:")}
+  bunx @different-ai/opencode-browser install
+
 ${color("bright", "For scheduled jobs:")}
   Run 'daemon-install' to enable browser tools in background jobs.
 `);
