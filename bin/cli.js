@@ -85,14 +85,25 @@ ${color("cyan", color("bright", "╚══════════════�
     await install();
   } else if (command === "uninstall") {
     await uninstall();
+  } else if (command === "daemon") {
+    await startDaemon();
+  } else if (command === "daemon-install") {
+    await installDaemon();
+  } else if (command === "start") {
+    rl.close();
+    await import("../src/server.js");
+    return;
   } else {
     log(`
 ${color("bright", "Usage:")}
-  npx opencode-browser install     Install extension and native host
-  npx opencode-browser uninstall   Remove native host registration
+  npx @different-ai/opencode-browser install         Install extension
+  npx @different-ai/opencode-browser daemon-install  Install background daemon
+  npx @different-ai/opencode-browser daemon          Run daemon (foreground)
+  npx @different-ai/opencode-browser start           Run MCP server
+  npx @different-ai/opencode-browser uninstall       Remove installation
 
-${color("bright", "After installation:")}
-  The MCP server starts automatically when OpenCode connects.
+${color("bright", "For scheduled jobs:")}
+  Run 'daemon-install' to enable browser tools in background jobs.
 `);
   }
 
@@ -280,6 +291,80 @@ ${color("bright", "Available tools:")}
   browser_execute    - Run JavaScript
 
 ${color("bright", "Logs:")} ~/.opencode-browser/logs/
+`);
+}
+
+async function startDaemon() {
+  const { spawn } = await import("child_process");
+  const daemonPath = join(PACKAGE_ROOT, "src", "daemon.js");
+  log("Starting daemon...");
+  const child = spawn(process.execPath, [daemonPath], { stdio: "inherit" });
+  child.on("exit", (code) => process.exit(code || 0));
+}
+
+async function installDaemon() {
+  header("Installing Background Daemon");
+  
+  const os = platform();
+  if (os !== "darwin") {
+    error("Daemon auto-install currently supports macOS only");
+    log("On Linux, create a systemd service manually.");
+    process.exit(1);
+  }
+  
+  const nodePath = process.execPath;
+  const daemonPath = join(PACKAGE_ROOT, "src", "daemon.js");
+  const logsDir = join(homedir(), ".opencode-browser", "logs");
+  
+  mkdirSync(logsDir, { recursive: true });
+  
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.opencode.browser-daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${nodePath}</string>
+    <string>${daemonPath}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${logsDir}/daemon.log</string>
+  <key>StandardErrorPath</key>
+  <string>${logsDir}/daemon.log</string>
+</dict>
+</plist>`;
+
+  const plistPath = join(homedir(), "Library", "LaunchAgents", "com.opencode.browser-daemon.plist");
+  writeFileSync(plistPath, plist);
+  success(`Created launchd plist: ${plistPath}`);
+  
+  try {
+    execSync(`launchctl unload "${plistPath}" 2>/dev/null || true`);
+    execSync(`launchctl load "${plistPath}"`);
+    success("Daemon started");
+  } catch (e) {
+    error(`Failed to load daemon: ${e.message}`);
+  }
+  
+  log(`
+${color("green", "✓")} Daemon installed and running
+
+The daemon bridges Chrome extension ↔ MCP server.
+It runs automatically on login and enables browser
+tools in scheduled OpenCode jobs.
+
+${color("bright", "Logs:")} ${logsDir}/daemon.log
+
+${color("bright", "Control:")}
+  launchctl stop com.opencode.browser-daemon
+  launchctl start com.opencode.browser-daemon
+  launchctl unload ~/Library/LaunchAgents/com.opencode.browser-daemon.plist
 `);
 }
 

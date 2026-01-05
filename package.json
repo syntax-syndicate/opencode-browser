@@ -1,6 +1,6 @@
 {
   "name": "@different-ai/opencode-browser",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Browser automation for OpenCode via Chrome extension + Native Messaging. Inspired by Claude in Chrome.",
   "type": "module",
   "bin": {
@@ -30,6 +30,7 @@
   },
   "homepage": "https://github.com/different-ai/opencode-browser#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ws": "^8.18.3"
   }
 }
