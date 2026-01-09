@@ -177,7 +177,8 @@ const plugin: Plugin = {
           loaded: true,
           sessionId,
           pid: process.pid,
-          tools: plugin.tools.map(t => t.name),
+          pluginVersion: getPackageVersion(),
+          tools: plugin.tools.map(t => ({ name: t.name, description: t.description })),
           timestamp: new Date().toISOString(),
         });
       }
