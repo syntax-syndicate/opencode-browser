@@ -76,6 +76,7 @@ Core primitives:
 - `browser_query` (modes: `text`, `value`, `list`, `exists`, `page_text`; optional `timeoutMs`/`pollMs`)
 - `browser_click`
 - `browser_type`
+- `browser_select`
 - `browser_scroll`
 - `browser_wait`
 
