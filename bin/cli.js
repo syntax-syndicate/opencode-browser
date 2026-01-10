@@ -25,6 +25,7 @@ import { homedir, platform } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline";
+import { createConnection } from "net";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,6 +36,7 @@ const EXTENSION_DIR = join(BASE_DIR, "extension");
 const BROKER_DST = join(BASE_DIR, "broker.cjs");
 const NATIVE_HOST_DST = join(BASE_DIR, "native-host.cjs");
 const CONFIG_DST = join(BASE_DIR, "config.json");
+const BROKER_SOCKET = join(BASE_DIR, "broker.sock");
 
 const NATIVE_HOST_NAME = "com.opencode.browser_automation";
 
@@ -90,6 +92,68 @@ async function confirm(question) {
 
 function ensureDir(p) {
   mkdirSync(p, { recursive: true });
+}
+
+function createJsonLineParser(onMessage) {
+  let buffer = "";
+  return (chunk) => {
+    buffer += chunk.toString("utf8");
+    while (true) {
+      const idx = buffer.indexOf("\n");
+      if (idx === -1) return;
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (!line.trim()) continue;
+      try {
+        onMessage(JSON.parse(line));
+      } catch {
+        // ignore
+      }
+    }
+  };
+}
+
+async function getBrokerStatus(timeoutMs = 2000) {
+  return await new Promise((resolve) => {
+    let done = false;
+    const socket = createConnection(BROKER_SOCKET);
+
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      try {
+        socket.end();
+      } catch {}
+      resolve(result);
+    };
+
+    const timeout = setTimeout(() => {
+      finish({ ok: false, error: "Timed out waiting for broker" });
+    }, timeoutMs);
+
+    socket.once("error", (err) => {
+      clearTimeout(timeout);
+      finish({ ok: false, error: err.message || "Broker connection failed" });
+    });
+
+    socket.once("connect", () => {
+      socket.write(JSON.stringify({ type: "request", id: 1, op: "status" }) + "\n");
+    });
+
+    socket.on(
+      "data",
+      createJsonLineParser((msg) => {
+        if (msg && msg.type === "response" && msg.id === 1) {
+          clearTimeout(timeout);
+          if (msg.ok) {
+            finish({ ok: true, data: msg.data });
+          } else {
+            finish({ ok: false, error: msg.error || "Broker status error" });
+          }
+        }
+      })
+    );
+  });
 }
 
 function copyDirRecursive(srcDir, destDir) {
@@ -407,18 +471,47 @@ Format rules (summary):
     warn("Skill template missing from package; skipping.");
   }
 
+  header("Step 9: Verify Extension Connection (optional)");
+
+  const shouldCheck = await confirm("Check broker + extension connection now?");
+  if (shouldCheck) {
+    while (true) {
+      const status = await getBrokerStatus();
+      if (status.ok && status.data?.hostConnected) {
+        success("Broker is running and extension is connected.");
+        break;
+      }
+
+      if (status.ok && !status.data?.hostConnected) {
+        warn("Broker is running but extension is not connected.");
+      } else {
+        warn(`Could not connect to local broker (${status.error || "unknown error"}).`);
+      }
+
+      log(`
+Open Chrome and:
+- Verify the extension is loaded in chrome://extensions
+- Click the OpenCode Browser extension icon to connect
+`);
+
+      const retry = await confirm("Retry broker check?");
+      if (!retry) break;
+    }
+  }
+
   header("Installation Complete!");
 
   log(`
-${color("bright", "What happens now:")}
+ ${color("bright", "What happens now:")}
   - The extension connects to the native host automatically.
   - OpenCode loads the plugin, which talks to the broker.
   - The broker enforces ${color("bright", "per-tab ownership")}. First touch auto-claims.
 
-${color("bright", "Try it:")}
+ ${color("bright", "Try it:")}
   Restart OpenCode and run: ${color("cyan", "browser_get_tabs")}
-`);
+ `);
 }
+
 
 async function status() {
   header("Status");
