@@ -26,6 +26,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline";
 import { createConnection } from "net";
+import { execSync } from "child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,6 +36,7 @@ const BASE_DIR = join(homedir(), ".opencode-browser");
 const EXTENSION_DIR = join(BASE_DIR, "extension");
 const BROKER_DST = join(BASE_DIR, "broker.cjs");
 const NATIVE_HOST_DST = join(BASE_DIR, "native-host.cjs");
+const NATIVE_HOST_WRAPPER = join(BASE_DIR, "host-wrapper.sh");
 const CONFIG_DST = join(BASE_DIR, "config.json");
 const BROKER_SOCKET = join(BASE_DIR, "broker.sock");
 
@@ -92,6 +94,26 @@ async function confirm(question) {
 
 function ensureDir(p) {
   mkdirSync(p, { recursive: true });
+}
+
+function resolveNodePath() {
+  if (process.env.OPENCODE_BROWSER_NODE) return process.env.OPENCODE_BROWSER_NODE;
+  if (process.execPath && /node(\.exe)?$/.test(process.execPath)) return process.execPath;
+  try {
+    const output = execSync("which node", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString("utf8")
+      .trim();
+    if (output) return output;
+  } catch {}
+  return process.execPath;
+}
+
+function writeHostWrapper(nodePath) {
+  ensureDir(BASE_DIR);
+  const script = `#!/bin/sh\n"${nodePath}" "${NATIVE_HOST_DST}"\n`;
+  writeFileSync(NATIVE_HOST_WRAPPER, script, { mode: 0o755 });
+  chmodSync(NATIVE_HOST_WRAPPER, 0o755);
+  return NATIVE_HOST_WRAPPER;
 }
 
 function createJsonLineParser(onMessage) {
@@ -196,13 +218,13 @@ function nativeHostManifestPath(dir) {
   return join(dir, `${NATIVE_HOST_NAME}.json`);
 }
 
-function writeNativeHostManifest(dir, extensionId) {
+function writeNativeHostManifest(dir, extensionId, hostPath) {
   ensureDir(dir);
 
   const manifest = {
     name: NATIVE_HOST_NAME,
     description: "OpenCode Browser native messaging host",
-    path: NATIVE_HOST_DST,
+    path: hostPath || NATIVE_HOST_DST,
     type: "stdio",
     allowed_origins: [`chrome-extension://${extensionId}/`],
   };
@@ -323,14 +345,21 @@ Find it at ${color("cyan", "chrome://extensions")}:
   success(`Installed broker: ${BROKER_DST}`);
   success(`Installed native host: ${NATIVE_HOST_DST}`);
 
-  saveConfig({ extensionId, installedAt: new Date().toISOString() });
+  const nodePath = resolveNodePath();
+  if (!/node(\.exe)?$/.test(nodePath)) {
+    warn(`Node not detected; using ${nodePath}. Set OPENCODE_BROWSER_NODE if needed.`);
+  }
+  const hostPath = writeHostWrapper(nodePath);
+  success(`Installed host wrapper: ${hostPath}`);
+
+  saveConfig({ extensionId, installedAt: new Date().toISOString(), nodePath });
 
   header("Step 6: Register Native Messaging Host");
 
   const hostDirs = getNativeHostDirs(osName);
   for (const dir of hostDirs) {
     try {
-      writeNativeHostManifest(dir, extensionId);
+      writeNativeHostManifest(dir, extensionId, hostPath);
       success(`Wrote native host manifest: ${nativeHostManifestPath(dir)}`);
     } catch (e) {
       warn(`Could not write native host manifest to: ${dir}`);
@@ -520,12 +549,17 @@ async function status() {
   success(`Extension dir present: ${existsSync(EXTENSION_DIR)}`);
   success(`Broker installed: ${existsSync(BROKER_DST)}`);
   success(`Native host installed: ${existsSync(NATIVE_HOST_DST)}`);
+  success(`Host wrapper installed: ${existsSync(NATIVE_HOST_WRAPPER)}`);
 
   const cfg = loadConfig();
   if (cfg?.extensionId) {
     success(`Configured extension ID: ${cfg.extensionId}`);
   } else {
     warn("No config.json found (run install)");
+  }
+
+  if (cfg?.nodePath) {
+    success(`Node path: ${cfg.nodePath}`);
   }
 
   const osName = platform();
