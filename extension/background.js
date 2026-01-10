@@ -100,6 +100,7 @@ async function executeTool(toolName, args) {
   const tools = {
     get_active_tab: toolGetActiveTab,
     get_tabs: toolGetTabs,
+    open_tab: toolOpenTab,
     navigate: toolNavigate,
     click: toolClick,
     type: toolType,
@@ -485,6 +486,15 @@ async function pageOps(command, args) {
 async function toolGetActiveTab() {
   const tab = await getActiveTab()
   return { tabId: tab.id, content: { tabId: tab.id, url: tab.url, title: tab.title } }
+}
+
+async function toolOpenTab({ url, active = true }) {
+  const createOptions = {}
+  if (typeof url === "string" && url.trim()) createOptions.url = url.trim()
+  if (typeof active === "boolean") createOptions.active = active
+
+  const tab = await chrome.tabs.create(createOptions)
+  return { tabId: tab.id, content: { tabId: tab.id, url: tab.url, active: tab.active } }
 }
 
 async function toolNavigate({ url, tabId }) {

@@ -216,6 +216,18 @@ const plugin: Plugin = async (ctx) => {
         },
       }),
 
+      browser_open_tab: tool({
+        description: "Open a new browser tab",
+        args: {
+          url: schema.string().optional(),
+          active: schema.boolean().optional(),
+        },
+        async execute({ url, active }, ctx) {
+          const data = await brokerRequest("tool", { tool: "open_tab", args: { url, active } });
+          return toolResultText(data, "Opened new tab");
+        },
+      }),
+
       browser_navigate: tool({
         description: "Navigate to a URL in the browser",
         args: {

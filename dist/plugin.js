@@ -12514,6 +12514,17 @@ var plugin = async (ctx) => {
           return toolResultText(data, "ok");
         }
       }),
+      browser_open_tab: tool({
+        description: "Open a new browser tab",
+        args: {
+          url: schema.string().optional(),
+          active: schema.boolean().optional()
+        },
+        async execute({ url: url2, active }, ctx2) {
+          const data = await brokerRequest("tool", { tool: "open_tab", args: { url: url2, active } });
+          return toolResultText(data, "Opened new tab");
+        }
+      }),
       browser_navigate: tool({
         description: "Navigate to a URL in the browser",
         args: {

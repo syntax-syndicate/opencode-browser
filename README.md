@@ -57,6 +57,7 @@ OpenCode Plugin <-> Local Broker (unix socket) <-> Native Host <-> Chrome Extens
 Core primitives:
 - `browser_status`
 - `browser_get_tabs`
+- `browser_open_tab`
 - `browser_navigate`
 - `browser_query` (modes: `text`, `value`, `list`, `exists`, `page_text`; optional `timeoutMs`/`pollMs`)
 - `browser_click`
