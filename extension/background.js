@@ -105,10 +105,7 @@ async function executeTool(toolName, args) {
     type: toolType,
     screenshot: toolScreenshot,
     snapshot: toolSnapshot,
-    extract: toolExtract,
     query: toolQuery,
-    wait_for: toolWaitFor,
-    execute_script: toolExecuteScript,
     scroll: toolScroll,
     wait: toolWait,
   }
@@ -126,6 +123,363 @@ async function getActiveTab() {
 
 async function getTabById(tabId) {
   return tabId ? await chrome.tabs.get(tabId) : await getActiveTab()
+}
+
+async function runInPage(tabId, command, args) {
+  const result = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: pageOps,
+    args: [command, args || {}],
+    world: "ISOLATED",
+  })
+  return result[0]?.result
+}
+
+async function pageOps(command, args) {
+  const options = args || {}
+  const MAX_DEPTH = 6
+
+  function safeString(value) {
+    return typeof value === "string" ? value : ""
+  }
+
+  function normalizeSelectorList(selector) {
+    if (Array.isArray(selector)) {
+      return selector.map((s) => safeString(s).trim()).filter(Boolean)
+    }
+    if (typeof selector !== "string") return []
+    const parts = selector
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+    return parts.length ? parts : [selector.trim()].filter(Boolean)
+  }
+
+  function isVisible(el) {
+    if (!el) return false
+    const rect = el.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return false
+    const style = window.getComputedStyle(el)
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false
+    return true
+  }
+
+  function deepQuerySelectorAll(sel, rootDoc) {
+    const out = []
+    const seen = new Set()
+
+    function addAll(nodeList) {
+      for (const el of nodeList) {
+        if (!el || seen.has(el)) continue
+        seen.add(el)
+        out.push(el)
+      }
+    }
+
+    function walkRoot(root, depth) {
+      if (!root || depth > MAX_DEPTH) return
+      try {
+        addAll(root.querySelectorAll(sel))
+      } catch {
+        return
+      }
+
+      const tree = root.querySelectorAll ? root.querySelectorAll("*") : []
+      for (const el of tree) {
+        if (el.shadowRoot) {
+          walkRoot(el.shadowRoot, depth + 1)
+        }
+      }
+
+      const frames = root.querySelectorAll ? root.querySelectorAll("iframe") : []
+      for (const frame of frames) {
+        try {
+          const doc = frame.contentDocument
+          if (doc) walkRoot(doc, depth + 1)
+        } catch {}
+      }
+    }
+
+    walkRoot(rootDoc || document, 0)
+    return out
+  }
+
+  function resolveMatches(selectors, index) {
+    for (const sel of selectors) {
+      const s = safeString(sel)
+      if (!s) continue
+      const matches = deepQuerySelectorAll(s, document)
+      if (!matches.length) continue
+      const visible = matches.filter(isVisible)
+      const chosen = visible[index] || matches[index]
+      return { selectorUsed: s, matches, chosen }
+    }
+    return { selectorUsed: selectors[0] || "", matches: [], chosen: null }
+  }
+
+  function clickElement(el) {
+    try {
+      el.scrollIntoView({ block: "center", inline: "center" })
+    } catch {}
+
+    const rect = el.getBoundingClientRect()
+    const x = Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1)
+    const y = Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1)
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
+
+    try {
+      el.dispatchEvent(new MouseEvent("mouseover", opts))
+      el.dispatchEvent(new MouseEvent("mousemove", opts))
+      el.dispatchEvent(new MouseEvent("mousedown", opts))
+      el.dispatchEvent(new MouseEvent("mouseup", opts))
+      el.dispatchEvent(new MouseEvent("click", opts))
+    } catch {}
+
+    try {
+      el.click()
+    } catch {}
+  }
+
+  function setNativeValue(el, value) {
+    const tag = el.tagName
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+      const proto = tag === "INPUT" ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set
+      if (setter) setter.call(el, value)
+      else el.value = value
+      return true
+    }
+    return false
+  }
+
+  function getInputValues() {
+    const out = []
+    const nodes = document.querySelectorAll("input, textarea")
+    nodes.forEach((el) => {
+      try {
+        const name = el.getAttribute("aria-label") || el.getAttribute("name") || el.id || el.className || el.tagName
+        const value = el.value
+        if (value != null && String(value).trim()) out.push(`${name}: ${value}`)
+      } catch {}
+    })
+    return out.join("\n")
+  }
+
+  function getPseudoText() {
+    const out = []
+    const elements = Array.from(document.querySelectorAll("*"))
+    for (let i = 0; i < elements.length && out.length < 2000; i++) {
+      const el = elements[i]
+      try {
+        const style = window.getComputedStyle(el)
+        if (style.display === "none" || style.visibility === "hidden") continue
+        const before = window.getComputedStyle(el, "::before").content
+        const after = window.getComputedStyle(el, "::after").content
+        const pushContent = (content) => {
+          if (!content) return
+          const c = String(content)
+          if (!c || c === "none" || c === "normal") return
+          const unquoted = c.replace(/^"|"$/g, "").replace(/^'|'$/g, "")
+          if (unquoted && unquoted !== "none" && unquoted !== "normal") out.push(unquoted)
+        }
+        pushContent(before)
+        pushContent(after)
+      } catch {}
+    }
+    return out.join("\n")
+  }
+
+  function buildMatches(text, pattern, flags) {
+    if (!pattern) return []
+    try {
+      const re = new RegExp(pattern, flags || "")
+      const found = []
+      let m
+      while ((m = re.exec(text)) && found.length < 50) {
+        found.push(m[0])
+        if (!re.global) break
+      }
+      return found
+    } catch {
+      return []
+    }
+  }
+
+  function getPageText(limit, pattern, flags) {
+    const parts = []
+    const bodyText = safeString(document.body?.innerText || "")
+    if (bodyText.trim()) parts.push(bodyText)
+    const inputValues = getInputValues()
+    if (inputValues) parts.push(inputValues)
+    const pseudo = getPseudoText()
+    if (pseudo) parts.push(pseudo)
+    const text = parts.filter(Boolean).join("\n\n").slice(0, Math.max(0, limit))
+    return {
+      url: location.href,
+      title: document.title,
+      text,
+      matches: buildMatches(text, pattern, flags),
+    }
+  }
+
+  const mode = typeof options.mode === "string" && options.mode ? options.mode : "text"
+  const selectors = normalizeSelectorList(options.selector)
+  const index = Number.isFinite(options.index) ? options.index : 0
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 0
+  const pollMs = Number.isFinite(options.pollMs) ? options.pollMs : 200
+  const limit = Number.isFinite(options.limit) ? options.limit : mode === "page_text" ? 20000 : 50
+  const pattern = typeof options.pattern === "string" ? options.pattern : null
+  const flags = typeof options.flags === "string" ? options.flags : "i"
+
+  if (command === "click") {
+    const match = resolveMatches(selectors, index)
+    if (!match.chosen) {
+      return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
+    }
+    clickElement(match.chosen)
+    return { ok: true, selectorUsed: match.selectorUsed }
+  }
+
+  if (command === "type") {
+    const text = options.text
+    const shouldClear = !!options.clear
+    const match = resolveMatches(selectors, index)
+    if (!match.chosen) {
+      return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
+    }
+
+    try {
+      match.chosen.scrollIntoView({ block: "center", inline: "center" })
+    } catch {}
+
+    try {
+      match.chosen.focus()
+    } catch {}
+
+    const tag = match.chosen.tagName
+    const isTextInput = tag === "INPUT" || tag === "TEXTAREA"
+
+    if (isTextInput) {
+      if (shouldClear) setNativeValue(match.chosen, "")
+      setNativeValue(match.chosen, (match.chosen.value || "") + text)
+      match.chosen.dispatchEvent(new Event("input", { bubbles: true }))
+      match.chosen.dispatchEvent(new Event("change", { bubbles: true }))
+      return { ok: true, selectorUsed: match.selectorUsed }
+    }
+
+    if (match.chosen.isContentEditable) {
+      if (shouldClear) match.chosen.textContent = ""
+      try {
+        document.execCommand("insertText", false, text)
+      } catch {
+        match.chosen.textContent = (match.chosen.textContent || "") + text
+      }
+      match.chosen.dispatchEvent(new Event("input", { bubbles: true }))
+      return { ok: true, selectorUsed: match.selectorUsed }
+    }
+
+    return { ok: false, error: `Element is not typable: ${match.selectorUsed} (${tag.toLowerCase()})` }
+  }
+
+  if (command === "scroll") {
+    const scrollX = Number.isFinite(options.x) ? options.x : 0
+    const scrollY = Number.isFinite(options.y) ? options.y : 0
+    if (selectors.length) {
+      const match = resolveMatches(selectors, index)
+      if (!match.chosen) {
+        return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
+      }
+      try {
+        match.chosen.scrollIntoView({ behavior: "smooth", block: "center" })
+      } catch {}
+      return { ok: true, selectorUsed: match.selectorUsed }
+    }
+    window.scrollBy(scrollX, scrollY)
+    return { ok: true }
+  }
+
+  if (command === "query") {
+    if (mode === "page_text") {
+      if (selectors.length && timeoutMs > 0) {
+        const start = Date.now()
+        while (Date.now() - start < timeoutMs) {
+          const match = resolveMatches(selectors, index)
+          if (match.matches.length) break
+          await new Promise((r) => setTimeout(r, pollMs))
+        }
+      }
+      return { ok: true, value: getPageText(limit, pattern, flags) }
+    }
+
+    if (!selectors.length) {
+      return { ok: false, error: "Selector is required" }
+    }
+
+    let match = resolveMatches(selectors, index)
+    if (timeoutMs > 0) {
+      const start = Date.now()
+      while (Date.now() - start < timeoutMs) {
+        match = resolveMatches(selectors, index)
+        if (mode === "exists" && match.matches.length) break
+        if (mode !== "exists" && match.chosen) break
+        await new Promise((r) => setTimeout(r, pollMs))
+      }
+    }
+
+    if (mode === "exists") {
+      return {
+        ok: true,
+        selectorUsed: match.selectorUsed,
+        value: { exists: match.matches.length > 0, count: match.matches.length },
+      }
+    }
+
+    if (!match.chosen) {
+      return { ok: false, error: `No matches for selectors: ${selectors.join(", ")}` }
+    }
+
+    if (mode === "text") {
+      const text = (match.chosen.innerText || match.chosen.textContent || "").trim()
+      return { ok: true, selectorUsed: match.selectorUsed, value: text }
+    }
+
+    if (mode === "value") {
+      const value = match.chosen.value
+      return { ok: true, selectorUsed: match.selectorUsed, value: typeof value === "string" ? value : String(value ?? "") }
+    }
+
+    if (mode === "attribute") {
+      const value = options.attribute ? match.chosen.getAttribute(options.attribute) : null
+      return { ok: true, selectorUsed: match.selectorUsed, value }
+    }
+
+    if (mode === "property") {
+      if (!options.property) return { ok: false, error: "property is required" }
+      return { ok: true, selectorUsed: match.selectorUsed, value: match.chosen[options.property] }
+    }
+
+    if (mode === "html") {
+      return { ok: true, selectorUsed: match.selectorUsed, value: match.chosen.outerHTML }
+    }
+
+    if (mode === "list") {
+      const maxItems = Math.min(Math.max(1, limit), 200)
+      const items = match.matches.slice(0, maxItems).map((el) => ({
+        text: (el.innerText || el.textContent || "").trim().slice(0, 200),
+        tag: (el.tagName || "").toLowerCase(),
+        ariaLabel: el.getAttribute ? el.getAttribute("aria-label") : null,
+      }))
+      return {
+        ok: true,
+        selectorUsed: match.selectorUsed,
+        value: { items, count: match.matches.length },
+      }
+    }
+
+    return { ok: false, error: `Unknown mode: ${mode}` }
+  }
+
+  return { ok: false, error: `Unknown command: ${String(command)}` }
 }
 
 async function toolGetActiveTab() {
@@ -155,126 +509,13 @@ async function toolNavigate({ url, tabId }) {
   return { tabId: tab.id, content: `Navigated to ${url}` }
 }
 
-function normalizeSelectorList(selector) {
-  if (typeof selector !== "string") return []
-  const parts = selector
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-  return parts.length ? parts : [selector.trim()].filter(Boolean)
-}
-
 async function toolClick({ selector, tabId, index = 0 }) {
   if (!selector) throw new Error("Selector is required")
   const tab = await getTabById(tabId)
 
-  const selectorList = normalizeSelectorList(selector)
-
-  const result = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: (selectors, index) => {
-      function safeString(v) {
-        return typeof v === "string" ? v : ""
-      }
-
-      function isVisible(el) {
-        if (!el) return false
-        const rect = el.getBoundingClientRect()
-        if (rect.width <= 0 || rect.height <= 0) return false
-        const style = window.getComputedStyle(el)
-        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false
-        return true
-      }
-
-      function deepQuerySelectorAll(sel, rootDoc) {
-        const out = []
-        const seen = new Set()
-
-        function addAll(nodeList) {
-          for (const el of nodeList) {
-            if (!el || seen.has(el)) continue
-            seen.add(el)
-            out.push(el)
-          }
-        }
-
-        function walkRoot(root, depth) {
-          if (!root || depth > 6) return
-
-          try {
-            addAll(root.querySelectorAll(sel))
-          } catch {
-            // Invalid selector
-            return
-          }
-
-          const tree = root.querySelectorAll ? root.querySelectorAll("*") : []
-          for (const el of tree) {
-            if (el.shadowRoot) {
-              walkRoot(el.shadowRoot, depth + 1)
-            }
-          }
-
-          // Same-origin iframes only
-          const frames = root.querySelectorAll ? root.querySelectorAll("iframe") : []
-          for (const frame of frames) {
-            try {
-              const doc = frame.contentDocument
-              if (doc) walkRoot(doc, depth + 1)
-            } catch {
-              // cross-origin
-            }
-          }
-        }
-
-        walkRoot(rootDoc || document, 0)
-        return out
-      }
-
-      function tryClick(el) {
-        try {
-          el.scrollIntoView({ block: "center", inline: "center" })
-        } catch {}
-
-        const rect = el.getBoundingClientRect()
-        const x = Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1)
-        const y = Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1)
-
-        const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
-        try {
-          el.dispatchEvent(new MouseEvent("mouseover", opts))
-          el.dispatchEvent(new MouseEvent("mousemove", opts))
-          el.dispatchEvent(new MouseEvent("mousedown", opts))
-          el.dispatchEvent(new MouseEvent("mouseup", opts))
-          el.dispatchEvent(new MouseEvent("click", opts))
-        } catch {}
-
-        try {
-          el.click()
-        } catch {}
-      }
-
-      for (const sel of selectors) {
-        const s = safeString(sel)
-        if (!s) continue
-
-        const matches = deepQuerySelectorAll(s, document)
-        const visible = matches.filter(isVisible)
-        const chosen = visible[index] || matches[index]
-        if (chosen) {
-          tryClick(chosen)
-          return { success: true, selectorUsed: s }
-        }
-      }
-
-      return { success: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
-    },
-    args: [selectorList, index],
-    world: "ISOLATED",
-  })
-
-  if (!result[0]?.result?.success) throw new Error(result[0]?.result?.error || "Click failed")
-  const used = result[0]?.result?.selectorUsed || selector
+  const result = await runInPage(tab.id, "click", { selector, index })
+  if (!result?.ok) throw new Error(result?.error || "Click failed")
+  const used = result.selectorUsed || selector
   return { tabId: tab.id, content: `Clicked ${used}` }
 }
 
@@ -283,121 +524,9 @@ async function toolType({ selector, text, tabId, clear = false, index = 0 }) {
   if (text === undefined) throw new Error("Text is required")
   const tab = await getTabById(tabId)
 
-  const selectorList = normalizeSelectorList(selector)
-
-  const result = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: (selectors, txt, shouldClear, index) => {
-      function isVisible(el) {
-        if (!el) return false
-        const rect = el.getBoundingClientRect()
-        if (rect.width <= 0 || rect.height <= 0) return false
-        const style = window.getComputedStyle(el)
-        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false
-        return true
-      }
-
-      function deepQuerySelectorAll(sel, rootDoc) {
-        const out = []
-        const seen = new Set()
-
-        function addAll(nodeList) {
-          for (const el of nodeList) {
-            if (!el || seen.has(el)) continue
-            seen.add(el)
-            out.push(el)
-          }
-        }
-
-        function walkRoot(root, depth) {
-          if (!root || depth > 6) return
-
-          try {
-            addAll(root.querySelectorAll(sel))
-          } catch {
-            return
-          }
-
-          const tree = root.querySelectorAll ? root.querySelectorAll("*") : []
-          for (const el of tree) {
-            if (el.shadowRoot) {
-              walkRoot(el.shadowRoot, depth + 1)
-            }
-          }
-
-          const frames = root.querySelectorAll ? root.querySelectorAll("iframe") : []
-          for (const frame of frames) {
-            try {
-              const doc = frame.contentDocument
-              if (doc) walkRoot(doc, depth + 1)
-            } catch {}
-          }
-        }
-
-        walkRoot(rootDoc || document, 0)
-        return out
-      }
-
-      function setNativeValue(el, value) {
-        const tag = el.tagName
-        if (tag === "INPUT" || tag === "TEXTAREA") {
-          const proto = tag === "INPUT" ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype
-          const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set
-          if (setter) setter.call(el, value)
-          else el.value = value
-          return true
-        }
-        return false
-      }
-
-      for (const sel of selectors) {
-        if (!sel) continue
-        const matches = deepQuerySelectorAll(sel, document)
-        const visible = matches.filter(isVisible)
-        const el = visible[index] || matches[index]
-        if (!el) continue
-
-        try {
-          el.scrollIntoView({ block: "center", inline: "center" })
-        } catch {}
-
-        try {
-          el.focus()
-        } catch {}
-
-        const tag = el.tagName
-        const isTextInput = tag === "INPUT" || tag === "TEXTAREA"
-
-        if (isTextInput) {
-          if (shouldClear) setNativeValue(el, "")
-          setNativeValue(el, (el.value || "") + txt)
-          el.dispatchEvent(new Event("input", { bubbles: true }))
-          el.dispatchEvent(new Event("change", { bubbles: true }))
-          return { success: true, selectorUsed: sel }
-        }
-
-        if (el.isContentEditable) {
-          if (shouldClear) el.textContent = ""
-          try {
-            document.execCommand("insertText", false, txt)
-          } catch {
-            el.textContent = (el.textContent || "") + txt
-          }
-          el.dispatchEvent(new Event("input", { bubbles: true }))
-          return { success: true, selectorUsed: sel }
-        }
-
-        return { success: false, error: `Element is not typable: ${sel} (${tag.toLowerCase()})` }
-      }
-
-      return { success: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
-    },
-    args: [selectorList, text, !!clear, index],
-    world: "ISOLATED",
-  })
-
-  if (!result[0]?.result?.success) throw new Error(result[0]?.result?.error || "Type failed")
-  const used = result[0]?.result?.selectorUsed || selector
+  const result = await runInPage(tab.id, "type", { selector, text, clear, index })
+  if (!result?.ok) throw new Error(result?.error || "Type failed")
+  const used = result.selectorUsed || selector
   return { tabId: tab.id, content: `Typed "${text}" into ${used}` }
 }
 
@@ -554,377 +683,57 @@ async function toolSnapshot({ tabId }) {
   return { tabId: tab.id, content: JSON.stringify(result[0]?.result, null, 2) }
 }
 
-async function toolExtract({ tabId, mode = "combined", pattern, flags = "i", limit = 20000 }) {
-  const tab = await getTabById(tabId)
-
-  const result = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: (mode, pattern, flags, limit) => {
-      const cap = (s) => String(s ?? "").slice(0, Math.max(0, limit || 0))
-
-      const getPseudoText = () => {
-        const out = []
-        const pushContent = (content) => {
-          if (!content) return
-          const c = String(content)
-          if (!c || c === "none" || c === "normal") return
-          const unquoted = c.replace(/^"|"$/g, "").replace(/^'|'$/g, "")
-          if (unquoted && unquoted !== "none" && unquoted !== "normal") out.push(unquoted)
-        }
-
-        const elements = Array.from(document.querySelectorAll("*"))
-        for (let i = 0; i < elements.length && out.length < 2000; i++) {
-          const el = elements[i]
-          try {
-            const style = window.getComputedStyle(el)
-            if (style.display === "none" || style.visibility === "hidden") continue
-            const before = window.getComputedStyle(el, "::before").content
-            const after = window.getComputedStyle(el, "::after").content
-            pushContent(before)
-            pushContent(after)
-          } catch {
-            // ignore
-          }
-        }
-        return out.join("\n")
-      }
-
-      const getInputValues = () => {
-        const out = []
-        const nodes = document.querySelectorAll("input, textarea")
-        nodes.forEach((el) => {
-          try {
-            const name = el.getAttribute("aria-label") || el.getAttribute("name") || el.id || el.className || el.tagName
-            const value = el.value
-            if (value != null && String(value).trim()) out.push(`${name}: ${value}`)
-          } catch {
-            // ignore
-          }
-        })
-        return out.join("\n")
-      }
-
-      const getText = () => {
-        try {
-          return document.body ? document.body.innerText || "" : ""
-        } catch {
-          return ""
-        }
-      }
-
-      const parts = []
-      if (mode === "text" || mode === "combined") parts.push(getText())
-      if (mode === "pseudo" || mode === "combined") parts.push(getPseudoText())
-      if (mode === "inputs" || mode === "combined") parts.push(getInputValues())
-
-      const text = cap(parts.filter(Boolean).join("\n\n"))
-
-      let matches = []
-      if (pattern) {
-        try {
-          const re = new RegExp(pattern, flags || "")
-          const found = []
-          let m
-          while ((m = re.exec(text)) && found.length < 50) {
-            found.push(m[0])
-            if (!re.global) break
-          }
-          matches = found
-        } catch (e) {
-          matches = []
-        }
-      }
-
-      return { url: location.href, title: document.title, mode, text, matches }
-    },
-    args: [mode, pattern, flags, limit],
-  })
-
-  return { tabId: tab.id, content: JSON.stringify(result[0]?.result, null, 2) }
-}
-
 async function toolGetTabs() {
   const tabs = await chrome.tabs.query({})
   const out = tabs.map((t) => ({ id: t.id, url: t.url, title: t.title, active: t.active, windowId: t.windowId }))
   return { content: JSON.stringify(out, null, 2) }
 }
 
-async function toolQuery({ tabId, selector, mode = "text", attribute, property, limit = 50, index = 0 }) {
-  if (!selector) throw new Error("selector is required")
+async function toolQuery({
+  tabId,
+  selector,
+  mode = "text",
+  attribute,
+  property,
+  limit,
+  index = 0,
+  timeoutMs,
+  pollMs,
+  pattern,
+  flags,
+}) {
+  if (!selector && mode !== "page_text") throw new Error("selector is required")
   const tab = await getTabById(tabId)
 
-  const selectorList = normalizeSelectorList(selector)
-
-  const result = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: (selectors, mode, attribute, property, limit, index) => {
-      function isVisible(el) {
-        if (!el) return false
-        const rect = el.getBoundingClientRect()
-        if (rect.width <= 0 || rect.height <= 0) return false
-        const style = window.getComputedStyle(el)
-        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false
-        return true
-      }
-
-      function deepQuerySelectorAll(sel, rootDoc) {
-        const out = []
-        const seen = new Set()
-
-        function addAll(nodeList) {
-          for (const el of nodeList) {
-            if (!el || seen.has(el)) continue
-            seen.add(el)
-            out.push(el)
-          }
-        }
-
-        function walkRoot(root, depth) {
-          if (!root || depth > 6) return
-
-          try {
-            addAll(root.querySelectorAll(sel))
-          } catch {
-            return
-          }
-
-          const tree = root.querySelectorAll ? root.querySelectorAll("*") : []
-          for (const el of tree) {
-            if (el.shadowRoot) {
-              walkRoot(el.shadowRoot, depth + 1)
-            }
-          }
-
-          const frames = root.querySelectorAll ? root.querySelectorAll("iframe") : []
-          for (const frame of frames) {
-            try {
-              const doc = frame.contentDocument
-              if (doc) walkRoot(doc, depth + 1)
-            } catch {}
-          }
-        }
-
-        walkRoot(rootDoc || document, 0)
-        return out
-      }
-
-      for (const sel of selectors) {
-        const matches = deepQuerySelectorAll(sel, document)
-        if (!matches.length) continue
-
-        const visible = matches.filter(isVisible)
-        const chosen = visible[index] || matches[index]
-
-        if (mode === "exists") {
-          return { ok: true, selectorUsed: sel, exists: true, count: matches.length }
-        }
-
-        if (!chosen) return { ok: false, error: `No element at index ${index} for ${sel}`, selectorUsed: sel }
-
-        if (mode === "text") {
-          const text = (chosen.innerText || chosen.textContent || "").trim()
-          return { ok: true, selectorUsed: sel, value: text }
-        }
-
-        if (mode === "value") {
-          const v = chosen.value
-          return { ok: true, selectorUsed: sel, value: typeof v === "string" ? v : String(v ?? "") }
-        }
-
-        if (mode === "attribute") {
-          const a = attribute ? chosen.getAttribute(attribute) : null
-          return { ok: true, selectorUsed: sel, value: a }
-        }
-
-        if (mode === "property") {
-          if (!property) return { ok: false, error: "property is required", selectorUsed: sel }
-          const v = chosen[property]
-          return { ok: true, selectorUsed: sel, value: v }
-        }
-
-        if (mode === "html") {
-          return { ok: true, selectorUsed: sel, value: chosen.outerHTML }
-        }
-
-        if (mode === "list") {
-          const items = matches
-            .slice(0, Math.max(1, Math.min(200, limit)))
-            .map((el) => ({
-              text: (el.innerText || el.textContent || "").trim().slice(0, 200),
-              tag: (el.tagName || "").toLowerCase(),
-              ariaLabel: el.getAttribute ? el.getAttribute("aria-label") : null,
-            }))
-          return { ok: true, selectorUsed: sel, items, count: matches.length }
-        }
-
-        return { ok: false, error: `Unknown mode: ${mode}`, selectorUsed: sel }
-      }
-
-      return { ok: false, error: `No matches for selectors: ${selectors.join(", ")}` }
-    },
-    args: [selectorList, mode, attribute || null, property || null, limit, index],
-    world: "ISOLATED",
+  const result = await runInPage(tab.id, "query", {
+    selector,
+    mode,
+    attribute,
+    property,
+    limit,
+    index,
+    timeoutMs,
+    pollMs,
+    pattern,
+    flags,
   })
 
-  const r = result[0]?.result
-  if (!r?.ok) throw new Error(r?.error || "Query failed")
+  if (!result?.ok) throw new Error(result?.error || "Query failed")
 
-  // Keep output predictable: JSON for list/property, string otherwise
-  if (mode === "list" || mode === "property") {
-    return { tabId: tab.id, content: JSON.stringify(r, null, 2) }
+  if (mode === "list" || mode === "property" || mode === "exists" || mode === "page_text") {
+    return { tabId: tab.id, content: JSON.stringify(result, null, 2) }
   }
 
-  return { tabId: tab.id, content: typeof r.value === "string" ? r.value : JSON.stringify(r.value) }
-}
-
-async function toolWaitFor({ tabId, selector, timeoutMs = 10000, pollMs = 200 }) {
-  if (!selector) throw new Error("selector is required")
-  const tab = await getTabById(tabId)
-
-  const selectorList = normalizeSelectorList(selector)
-
-  const result = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: async (selectors, timeoutMs, pollMs) => {
-      function isVisible(el) {
-        if (!el) return false
-        const rect = el.getBoundingClientRect()
-        if (rect.width <= 0 || rect.height <= 0) return false
-        const style = window.getComputedStyle(el)
-        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false
-        return true
-      }
-
-      function deepQuerySelector(sel, rootDoc) {
-        function findInRoot(root, depth) {
-          if (!root || depth > 6) return null
-          try {
-            const found = root.querySelector(sel)
-            if (found) return found
-          } catch {
-            return null
-          }
-
-          const tree = root.querySelectorAll ? root.querySelectorAll("*") : []
-          for (const el of tree) {
-            if (el.shadowRoot) {
-              const f = findInRoot(el.shadowRoot, depth + 1)
-              if (f) return f
-            }
-          }
-
-          const frames = root.querySelectorAll ? root.querySelectorAll("iframe") : []
-          for (const frame of frames) {
-            try {
-              const doc = frame.contentDocument
-              if (doc) {
-                const f = findInRoot(doc, depth + 1)
-                if (f) return f
-              }
-            } catch {}
-          }
-
-          return null
-        }
-
-        return findInRoot(rootDoc || document, 0)
-      }
-
-      const start = Date.now()
-      while (Date.now() - start < timeoutMs) {
-        for (const sel of selectors) {
-          if (!sel) continue
-          const el = deepQuerySelector(sel, document)
-          if (el && isVisible(el)) return { ok: true, selectorUsed: sel }
-        }
-        await new Promise((r) => setTimeout(r, pollMs))
-      }
-
-      return { ok: false, error: `Timed out waiting for selectors: ${selectors.join(", ")}` }
-    },
-    args: [selectorList, timeoutMs, pollMs],
-    world: "ISOLATED",
-  })
-
-  const r = result[0]?.result
-  if (!r?.ok) throw new Error(r?.error || "wait_for failed")
-  return { tabId: tab.id, content: `Found ${r.selectorUsed}` }
-}
-
-// Legacy tool kept for compatibility.
-// We intentionally do NOT evaluate arbitrary JS strings (unpredictable + CSP/unsafe-eval issues).
-// Instead, accept a JSON payload string describing a query.
-async function toolExecuteScript({ code, tabId }) {
-  if (!code) throw new Error("Code is required")
-
-  let command
-  try {
-    command = JSON.parse(code)
-  } catch {
-    throw new Error(
-      "browser_execute expects JSON (not raw JS) due to MV3 CSP. Try: {\"op\":\"query\",\"selector\":\"...\",\"return\":\"text\" } or use browser_extract."
-    )
-  }
-
-  const tab = await getTabById(tabId)
-  const result = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: (cmd) => {
-      const getBySelector = (selector) => {
-        if (!selector) return null
-        try {
-          return document.querySelector(selector)
-        } catch {
-          return null
-        }
-      }
-
-      const op = cmd?.op
-      if (op === "query") {
-        const el = getBySelector(cmd.selector)
-        if (!el) return { ok: false, error: "not_found" }
-        const ret = cmd.return || "text"
-        if (ret === "text") return { ok: true, value: el.innerText ?? el.textContent ?? "" }
-        if (ret === "value") return { ok: true, value: el.value }
-        if (ret === "html") return { ok: true, value: el.innerHTML }
-        if (ret === "attr") return { ok: true, value: el.getAttribute(cmd.name) }
-        if (ret === "href") return { ok: true, value: el.href }
-        return { ok: false, error: `unknown_return:${ret}` }
-      }
-
-      if (op === "location") {
-        return { ok: true, value: { url: location.href, title: document.title } }
-      }
-
-      return { ok: false, error: `unknown_op:${String(op)}` }
-    },
-    args: [command],
-  })
-
-  return { tabId: tab.id, content: JSON.stringify(result[0]?.result) }
+  return { tabId: tab.id, content: typeof result.value === "string" ? result.value : JSON.stringify(result.value) }
 }
 
 async function toolScroll({ x = 0, y = 0, selector, tabId }) {
   const tab = await getTabById(tabId)
-  const sel = selector || null
 
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: (scrollX, scrollY, sel) => {
-      if (sel) {
-        const el = document.querySelector(sel)
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" })
-          return
-        }
-      }
-      window.scrollBy(scrollX, scrollY)
-    },
-    args: [x, y, sel],
-    world: "ISOLATED",
-  })
-
-  return { tabId: tab.id, content: `Scrolled ${sel ? `to ${sel}` : `by (${x}, ${y})`}` }
+  const result = await runInPage(tab.id, "scroll", { x, y, selector })
+  if (!result?.ok) throw new Error(result?.error || "Scroll failed")
+  const target = result.selectorUsed ? `to ${result.selectorUsed}` : `by (${x}, ${y})`
+  return { tabId: tab.id, content: `Scrolled ${target}` }
 }
 
 async function toolWait({ ms = 1000, tabId }) {

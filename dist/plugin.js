@@ -12595,96 +12595,27 @@ var plugin = async (ctx) => {
           return toolResultText(data, "Waited");
         }
       }),
-      browser_execute: tool({
-        description: "(Deprecated) Execute arbitrary JavaScript in-page. Blocked on many sites by MV3 CSP/unsafe-eval. This tool now accepts JSON commands; prefer browser_query/browser_extract/browser_wait_for.",
-        args: {
-          code: schema.string(),
-          tabId: schema.number().optional()
-        },
-        async execute({ code, tabId }, ctx2) {
-          const data = await brokerRequest("tool", { tool: "execute_script", args: { code, tabId } });
-          return toolResultText(data, "Execute failed");
-        }
-      }),
       browser_query: tool({
-        description: "Read data from the page using selectors (supports shadow DOM + same-origin iframes).",
+        description: "Read data from the page using selectors, optional wait, or page_text extraction (shadow DOM + same-origin iframes).",
         args: {
-          selector: schema.string(),
+          selector: schema.string().optional(),
           mode: schema.string().optional(),
           attribute: schema.string().optional(),
           property: schema.string().optional(),
           index: schema.number().optional(),
           limit: schema.number().optional(),
-          tabId: schema.number().optional()
-        },
-        async execute({ selector, mode, attribute, property, index, limit, tabId }, ctx2) {
-          const data = await brokerRequest("tool", {
-            tool: "query",
-            args: { selector, mode, attribute, property, index, limit, tabId }
-          });
-          return toolResultText(data, "Query failed");
-        }
-      }),
-      browser_wait_for: tool({
-        description: "Wait until a selector appears (supports shadow DOM + same-origin iframes).",
-        args: {
-          selector: schema.string(),
           timeoutMs: schema.number().optional(),
           pollMs: schema.number().optional(),
-          tabId: schema.number().optional()
-        },
-        async execute({ selector, timeoutMs, pollMs, tabId }, ctx2) {
-          const data = await brokerRequest("tool", {
-            tool: "wait_for",
-            args: { selector, timeoutMs, pollMs, tabId }
-          });
-          return toolResultText(data, "Wait-for failed");
-        }
-      }),
-      browser_extract: tool({
-        description: "Extract readable text from the page (optionally regex match). Useful when content isn't in the accessibility tree.",
-        args: {
-          mode: schema.string().optional(),
           pattern: schema.string().optional(),
           flags: schema.string().optional(),
-          limit: schema.number().optional(),
           tabId: schema.number().optional()
         },
-        async execute({ mode, pattern, flags, limit, tabId }, ctx2) {
+        async execute({ selector, mode, attribute, property, index, limit, timeoutMs, pollMs, pattern, flags, tabId }, ctx2) {
           const data = await brokerRequest("tool", {
-            tool: "extract",
-            args: { mode, pattern, flags, limit, tabId }
+            tool: "query",
+            args: { selector, mode, attribute, property, index, limit, timeoutMs, pollMs, pattern, flags, tabId }
           });
-          return toolResultText(data, "Extract failed");
-        }
-      }),
-      browser_claim_tab: tool({
-        description: "Claim a tab for this OpenCode session (per-tab ownership).",
-        args: {
-          tabId: schema.number(),
-          force: schema.boolean().optional()
-        },
-        async execute({ tabId, force }, ctx2) {
-          const data = await brokerRequest("claim_tab", { tabId, force });
-          return JSON.stringify(data);
-        }
-      }),
-      browser_release_tab: tool({
-        description: "Release a previously claimed tab.",
-        args: {
-          tabId: schema.number()
-        },
-        async execute({ tabId }, ctx2) {
-          const data = await brokerRequest("release_tab", { tabId });
-          return JSON.stringify(data);
-        }
-      }),
-      browser_list_claims: tool({
-        description: "List current tab ownership claims.",
-        args: {},
-        async execute(args, ctx2) {
-          const data = await brokerRequest("list_claims", {});
-          return JSON.stringify(data);
+          return toolResultText(data, "Query failed");
         }
       })
     }

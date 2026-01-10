@@ -23,11 +23,11 @@ The installer will:
 1. Copy the extension to `~/.opencode-browser/extension/`
 2. Walk you through loading + pinning it in `chrome://extensions`
 3. Ask for the extension ID and install a **Native Messaging Host manifest**
-4. Update your `.opencode.json` to load the plugin
+4. Update your `opencode.json` or `opencode.jsonc` to load the plugin
 
 ### Configure OpenCode
 
-Your `.opencode.json` should contain:
+Your `opencode.json` or `opencode.jsonc` should contain:
 
 ```json
 {
@@ -50,29 +50,24 @@ OpenCode Plugin <-> Local Broker (unix socket) <-> Native Host <-> Chrome Extens
 
 - First time a session touches a tab, the broker **auto-claims** it for that session.
 - Other sessions attempting to use the same tab will get an error.
-
-Tools:
-
-- `browser_claim_tab({ tabId })`
-- `browser_release_tab({ tabId })`
-- `browser_list_claims()`
+- Use `browser_status` to inspect claims if needed.
 
 ## Available tools
 
-- `browser_version`
+Core primitives:
 - `browser_status`
 - `browser_get_tabs`
 - `browser_navigate`
+- `browser_query` (modes: `text`, `value`, `list`, `exists`, `page_text`; optional `timeoutMs`/`pollMs`)
 - `browser_click`
 - `browser_type`
-- `browser_screenshot`
-- `browser_snapshot`
 - `browser_scroll`
 - `browser_wait`
-- `browser_execute` (deprecated, CSP-limited)
-- `browser_query`
-- `browser_wait_for`
-- `browser_extract`
+
+Diagnostics:
+- `browser_snapshot`
+- `browser_screenshot`
+- `browser_version`
 
 ## Troubleshooting
 
@@ -81,8 +76,8 @@ Tools:
 - Confirm the extension ID you pasted matches the loaded extension in `chrome://extensions`
 
 **Tab ownership errors**
-- Use `browser_list_claims()` to see who owns a tab
-- Use `browser_claim_tab({ tabId, force: true })` to take over intentionally
+- Use `browser_status` to see current claims
+- Close the other OpenCode session to release ownership
 
 ## Uninstall
 
@@ -90,4 +85,4 @@ Tools:
 npx @different-ai/opencode-browser uninstall
 ```
 
-Then remove the unpacked extension in `chrome://extensions` and remove the plugin from `.opencode.json`.
+Then remove the unpacked extension in `chrome://extensions` and remove the plugin from `opencode.json` or `opencode.jsonc`.
