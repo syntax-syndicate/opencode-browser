@@ -1,6 +1,6 @@
 # OpenCode Browser
 
-Browser automation plugin for [OpenCode](https://github.com/opencode-ai/opencode).
+Browser automation plugin for [OpenCode](https://opencode.ai).
 
 Control your real Chromium browser (Chrome/Brave/Arc/Edge) using your existing profile (logins, cookies, bookmarks). No DevTools Protocol, no security prompts.
 
