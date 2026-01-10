@@ -289,6 +289,10 @@ Find it at ${color("cyan", "chrome://extensions")}:
       .replace(/^\s*\/\/.*$/gm, "");
   }
 
+  function sanitizeJson(contents) {
+    return stripJsoncComments(contents).replace(/,\s*(\]|\})/g, "$1");
+  }
+
   function findOpenCodeConfigPath(configDir) {
     const jsoncPath = join(configDir, "opencode.jsonc");
     if (existsSync(jsoncPath)) return jsoncPath;
@@ -338,17 +342,38 @@ Find it at ${color("cyan", "chrome://extensions")}:
 
     if (shouldUpdate) {
       try {
-        const config = hasExistingConfig
-          ? JSON.parse(stripJsoncComments(readFileSync(configPath, "utf-8")))
-          : { $schema: "https://opencode.ai/config.json", plugin: [] };
+        let config = { $schema: "https://opencode.ai/config.json", plugin: [] };
+        let canWriteConfig = true;
 
-        config.plugin = normalizePlugins(config.plugin);
-        if (!config.plugin.includes(desiredPlugin)) config.plugin.push(desiredPlugin);
-        if (typeof config.$schema !== "string") config.$schema = "https://opencode.ai/config.json";
+        if (hasExistingConfig) {
+          const rawConfig = readFileSync(configPath, "utf-8");
+          try {
+            config = JSON.parse(sanitizeJson(rawConfig));
+          } catch (e) {
+            error(`Failed to parse ${configPath}: ${e.message}`);
+            const shouldOverwrite = await confirm("Config is invalid JSON. Back up and recreate it?");
+            if (shouldOverwrite) {
+              const backupPath = `${configPath}.bak-${Date.now()}`;
+              writeFileSync(backupPath, rawConfig);
+              warn(`Backed up invalid config to ${backupPath}`);
+              config = { $schema: "https://opencode.ai/config.json", plugin: [] };
+            } else {
+              canWriteConfig = false;
+            }
+          }
+        }
 
-        ensureDir(configDir);
-        writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-        success(`Updated ${configPath} with plugin`);
+        if (canWriteConfig) {
+          config.plugin = normalizePlugins(config.plugin);
+          if (!config.plugin.includes(desiredPlugin)) config.plugin.push(desiredPlugin);
+          if (typeof config.$schema !== "string") config.$schema = "https://opencode.ai/config.json";
+
+          ensureDir(configDir);
+          writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+          success(`Updated ${configPath} with plugin`);
+        } else {
+          warn(`Skipped updating ${configPath}. Fix JSON manually and rerun install.`);
+        }
       } catch (e) {
         error(`Failed to update ${configPath}: ${e.message}`);
       }
