@@ -82,6 +82,14 @@ Diagnostics:
 - `browser_screenshot`
 - `browser_version`
 
+## Roadmap
+
+- [ ] Add tab management tools (`browser_set_active_tab`, `browser_close_tab`)
+- [ ] Add navigation helpers (`browser_back`, `browser_forward`, `browser_reload`)
+- [ ] Add keyboard input tool (`browser_key`)
+- [ ] Add download support (`browser_download`, `browser_list_downloads`)
+- [ ] Add upload support (`browser_set_file_input`)
+
 ## Troubleshooting
 
 **Extension says native host not available**
