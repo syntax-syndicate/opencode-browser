@@ -268,6 +268,26 @@ const plugin: Plugin = async (ctx) => {
         },
       }),
 
+      browser_select: tool({
+        description: "Select an option in a native select element",
+        args: {
+          selector: schema.string(),
+          value: schema.string().optional(),
+          label: schema.string().optional(),
+          optionIndex: schema.number().optional(),
+          index: schema.number().optional(),
+          tabId: schema.number().optional(),
+        },
+        async execute({ selector, value, label, optionIndex, index, tabId }, ctx) {
+          const data = await brokerRequest("tool", {
+            tool: "select",
+            args: { selector, value, label, optionIndex, index, tabId },
+          });
+          const summary = value ?? label ?? (optionIndex != null ? String(optionIndex) : "option");
+          return toolResultText(data, `Selected ${summary} in ${selector}`);
+        },
+      }),
+
       browser_screenshot: tool({
         description: "Take a screenshot of the current page. Returns base64 image data URL.",
         args: {

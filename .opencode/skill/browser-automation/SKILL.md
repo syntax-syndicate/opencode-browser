@@ -21,8 +21,14 @@ metadata:
 3. Navigate with `browser_navigate` if needed
 4. Wait for UI using `browser_query` with `timeoutMs`
 5. Discover candidates using `browser_query` with `mode=list`
-6. Click or type using `index`
+6. Click, type, or select using `index`
 7. Confirm using `browser_query` or `browser_snapshot`
+
+## Selecting options
+
+- Use `browser_select` for native `<select>` elements
+- Prefer `value` or `label`; use `optionIndex` when needed
+- Example: `browser_select({ selector: "select", value: "plugin" })`
 
 ## Query modes
 
