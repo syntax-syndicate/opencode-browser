@@ -39,6 +39,8 @@ The installer will:
 
 ### Configure OpenCode
 
+> Note: if you run the installer you'll be prompted to include this automatically. If you said "yes", you can skip this part.
+
 Your `opencode.json` or `opencode.jsonc` should contain:
 
 ```json
