@@ -111,11 +111,11 @@ export OPENCODE_BROWSER_AGENT_PORT=9833
 
 ## Per-tab ownership
 
-- First time a session touches a tab, the broker **auto-claims** it for that session.
-- Each session tracks a default tab; tools without `tabId` route to it.
-- `browser_open_tab` always works; if another session owns the active tab, the new tab opens in the background.
+- Each session owns its own tabs; tabs are never shared between sessions.
+- If a session has no tab yet, the broker auto-creates a background tab on first tool use.
+- `browser_open_tab` always creates and claims a new tab for the session.
 - Claims expire after inactivity (`OPENCODE_BROWSER_CLAIM_TTL_MS`, default 5 minutes).
-- Use `browser_status` or `browser_list_claims` to inspect claims if needed.
+- Use `browser_status` or `browser_list_claims` for debugging.
 
 ## Available tools
 
@@ -126,6 +126,7 @@ Core primitives:
 - `browser_claim_tab`
 - `browser_release_tab`
 - `browser_open_tab`
+- `browser_close_tab`
 - `browser_navigate`
 - `browser_query` (modes: `text`, `value`, `list`, `exists`, `page_text`; optional `timeoutMs`/`pollMs`)
 - `browser_click` (optional `timeoutMs`/`pollMs`)
@@ -149,7 +150,7 @@ Diagnostics:
 
 ## Roadmap
 
-- [ ] Add tab management tools (`browser_set_active_tab`, `browser_close_tab`)
+- [ ] Add tab management tools (`browser_set_active_tab`)
 - [ ] Add navigation helpers (`browser_back`, `browser_forward`, `browser_reload`)
 - [ ] Add keyboard input tool (`browser_key`)
 - [ ] Add download support (`browser_download`, `browser_list_downloads`)
@@ -162,8 +163,9 @@ Diagnostics:
 - If you loaded a custom extension ID, rerun with `--extension-id <id>`
 
 **Tab ownership errors**
-- Use `browser_status` or `browser_list_claims` to see current claims
-- Use `browser_release_tab` or close the other OpenCode session to release ownership
+- Errors usually mean you passed a `tabId` owned by another session
+- Use `browser_open_tab` to create a tab for your session (or omit `tabId` to use your default)
+- Use `browser_status` or `browser_list_claims` for debugging
 
 ## Uninstall
 

@@ -628,6 +628,13 @@ export function createAgentBackend(sessionId: string): AgentBackend {
         }
         return { content: { tabId: created.index, url: args.url, active: active !== false } };
       }
+      case "close_tab": {
+        const payload: Record<string, any> = {};
+        if (Number.isFinite(args.tabId)) payload.index = args.tabId;
+        const result = await agentCommand("tab_close", payload);
+        const closed = Number.isFinite(result?.closed) ? result.closed : args.tabId;
+        return { content: { tabId: closed, remaining: result?.remaining } };
+      }
       case "navigate": {
         return await withTab(args.tabId, async () => {
           if (!args.url) throw new Error("URL is required");

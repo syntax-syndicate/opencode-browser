@@ -206,10 +206,13 @@ function callExtension(tool, args, sessionId) {
   });
 }
 
-async function resolveActiveTab(sessionId) {
-  const res = await callExtension("get_active_tab", {}, sessionId);
+async function ensureSessionTab(sessionId) {
+  if (!sessionId) throw new Error("Missing sessionId for tab creation");
+  const res = await callExtension("open_tab", { active: false }, sessionId);
   const tabId = res && typeof res.tabId === "number" ? res.tabId : undefined;
-  if (!tabId) throw new Error("Could not determine active tab");
+  if (!tabId) throw new Error("Failed to create a new tab for this session");
+  touchClaim(tabId, sessionId);
+  setDefaultTab(sessionId, tabId);
   return tabId;
 }
 
@@ -222,13 +225,7 @@ async function handleTool(pluginSocket, req) {
   let tabId = args.tabId;
   const toolArgs = { ...args };
 
-  if (tool === "open_tab" && toolArgs.active !== false) {
-    const activeTabId = await resolveActiveTab(sessionId);
-    const claimCheck = checkClaim(activeTabId, sessionId);
-    if (!claimCheck.ok) {
-      toolArgs.active = false;
-    }
-  }
+  const isCloseTool = tool === "close_tab";
 
   if (wantsTab(tool)) {
     if (typeof tabId !== "number") {
@@ -236,14 +233,10 @@ async function handleTool(pluginSocket, req) {
       const defaultTabId = state && Number.isFinite(state.defaultTabId) ? state.defaultTabId : null;
       if (Number.isFinite(defaultTabId)) {
         tabId = defaultTabId;
+      } else if (!isCloseTool) {
+        tabId = await ensureSessionTab(sessionId);
       } else {
-        const activeTabId = await resolveActiveTab(sessionId);
-        const claimCheck = checkClaim(activeTabId, sessionId);
-        if (!claimCheck.ok) {
-          throw new Error(`${claimCheck.error}. No default tab for session; open a new tab or claim one.`);
-        }
-        tabId = activeTabId;
-        setDefaultTab(sessionId, tabId);
+        throw new Error("No tab owned by this session. Open a new tab first.");
       }
     }
 
@@ -256,8 +249,16 @@ async function handleTool(pluginSocket, req) {
   const usedTabId =
     res && typeof res.tabId === "number" ? res.tabId : typeof tabId === "number" ? tabId : undefined;
   if (typeof usedTabId === "number") {
-    touchClaim(usedTabId, sessionId);
-    setDefaultTab(sessionId, usedTabId);
+    if (isCloseTool) {
+      if (claims.has(usedTabId)) {
+        releaseClaim(usedTabId);
+      } else {
+        clearDefaultTab(sessionId, usedTabId);
+      }
+    } else {
+      touchClaim(usedTabId, sessionId);
+      setDefaultTab(sessionId, usedTabId);
+    }
   }
 
   return res;

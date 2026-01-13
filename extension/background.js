@@ -101,6 +101,7 @@ async function executeTool(toolName, args) {
     get_active_tab: toolGetActiveTab,
     get_tabs: toolGetTabs,
     open_tab: toolOpenTab,
+    close_tab: toolCloseTab,
     navigate: toolNavigate,
     click: toolClick,
     type: toolType,
@@ -707,6 +708,12 @@ async function toolOpenTab({ url, active = true }) {
 
   const tab = await chrome.tabs.create(createOptions)
   return { tabId: tab.id, content: { tabId: tab.id, url: tab.url, active: tab.active } }
+}
+
+async function toolCloseTab({ tabId }) {
+  if (!Number.isFinite(tabId)) throw new Error("tabId is required")
+  await chrome.tabs.remove(tabId)
+  return { tabId, content: { tabId, closed: true } }
 }
 
 async function toolNavigate({ url, tabId }) {

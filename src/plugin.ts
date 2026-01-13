@@ -303,6 +303,17 @@ const plugin: Plugin = async (ctx) => {
         },
       }),
 
+      browser_close_tab: tool({
+        description: "Close a browser tab owned by this session",
+        args: {
+          tabId: schema.number().optional(),
+        },
+        async execute({ tabId }, ctx) {
+          const data = await toolRequest("close_tab", { tabId });
+          return toolResultText(data, "Closed tab");
+        },
+      }),
+
       browser_navigate: tool({
         description: "Navigate to a URL in the browser",
         args: {
