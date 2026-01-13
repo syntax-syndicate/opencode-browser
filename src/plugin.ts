@@ -1,13 +1,13 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import net from "net";
+import { createAgentBackend, type AgentBackend } from "./agent-backend.js";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 
-console.log("[opencode-browser] Plugin loading...", { pid: process.pid });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -88,10 +88,17 @@ async function sleep(ms: number): Promise<void> {
   return await new Promise((r) => setTimeout(r, ms));
 }
 
+const BACKEND_MODE = (process.env.OPENCODE_BROWSER_BACKEND ?? process.env.OPENCODE_BROWSER_MODE ?? "extension")
+  .toLowerCase()
+  .trim();
+const USE_AGENT_BACKEND = ["agent", "agent-browser", "agentbrowser"].includes(BACKEND_MODE);
+
 let socket: net.Socket | null = null;
 let sessionId = Math.random().toString(36).slice(2);
 let reqId = 0;
 const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+
+const agentBackend: AgentBackend | null = USE_AGENT_BACKEND ? createAgentBackend(sessionId) : null;
 
 async function ensureBrokerSocket(): Promise<net.Socket> {
   if (socket && !socket.destroyed) return socket;
@@ -165,8 +172,31 @@ function toolResultText(data: any, fallback: string): string {
   return fallback;
 }
 
+async function toolRequest(toolName: string, args: Record<string, any>): Promise<any> {
+  if (USE_AGENT_BACKEND) {
+    if (!agentBackend) {
+      throw new Error("Agent backend unavailable: configuration failed to initialize");
+    }
+    return await agentBackend.requestTool(toolName, args);
+  }
+  return await brokerRequest("tool", { tool: toolName, args });
+}
+
+async function statusRequest(): Promise<any> {
+  if (USE_AGENT_BACKEND) {
+    if (!agentBackend) {
+      return {
+        backend: "agent-browser",
+        connected: false,
+        error: "Agent backend unavailable: configuration failed to initialize",
+      };
+    }
+    return await agentBackend.status();
+  }
+  return await brokerRequest("status", {});
+}
+
 const plugin: Plugin = async (ctx) => {
-  console.log("[opencode-browser] Plugin loading...", { pid: process.pid });
 
   return {
     tool: {
@@ -179,6 +209,10 @@ const plugin: Plugin = async (ctx) => {
             loaded: true,
             sessionId,
             pid: process.pid,
+            backend: USE_AGENT_BACKEND ? "agent-browser" : "extension",
+            agentSession: agentBackend?.session ?? null,
+            agentConnection: agentBackend?.connection ?? null,
+            agentBrowserVersion: agentBackend?.getVersion?.() ?? null,
             pluginVersion: getPackageVersion(),
             timestamp: new Date().toISOString(),
           });
@@ -194,15 +228,17 @@ const plugin: Plugin = async (ctx) => {
             version: getPackageVersion(),
             sessionId,
             pid: process.pid,
+            backend: USE_AGENT_BACKEND ? "agent-browser" : "extension",
+            agentBrowserVersion: agentBackend?.getVersion?.() ?? null,
           });
         },
       }),
 
       browser_status: tool({
-        description: "Check broker/native-host connection status and current tab claims.",
+        description: "Check backend connection status and current tab claims.",
         args: {},
         async execute(args, ctx) {
-          const data = await brokerRequest("status", {});
+          const data = await statusRequest();
           return JSON.stringify(data);
         },
       }),
@@ -211,7 +247,7 @@ const plugin: Plugin = async (ctx) => {
         description: "List all open browser tabs",
         args: {},
         async execute(args, ctx) {
-          const data = await brokerRequest("tool", { tool: "get_tabs", args: {} });
+          const data = await toolRequest("get_tabs", {});
           return toolResultText(data, "ok");
         },
       }),
@@ -223,7 +259,7 @@ const plugin: Plugin = async (ctx) => {
           active: schema.boolean().optional(),
         },
         async execute({ url, active }, ctx) {
-          const data = await brokerRequest("tool", { tool: "open_tab", args: { url, active } });
+          const data = await toolRequest("open_tab", { url, active });
           return toolResultText(data, "Opened new tab");
         },
       }),
@@ -235,7 +271,7 @@ const plugin: Plugin = async (ctx) => {
           tabId: schema.number().optional(),
         },
         async execute({ url, tabId }, ctx) {
-          const data = await brokerRequest("tool", { tool: "navigate", args: { url, tabId } });
+          const data = await toolRequest("navigate", { url, tabId });
           return toolResultText(data, `Navigated to ${url}`);
         },
       }),
@@ -246,9 +282,11 @@ const plugin: Plugin = async (ctx) => {
           selector: schema.string(),
           index: schema.number().optional(),
           tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional(),
         },
-        async execute({ selector, index, tabId }, ctx) {
-          const data = await brokerRequest("tool", { tool: "click", args: { selector, index, tabId } });
+        async execute({ selector, index, tabId, timeoutMs, pollMs }, ctx) {
+          const data = await toolRequest("click", { selector, index, tabId, timeoutMs, pollMs });
           return toolResultText(data, `Clicked ${selector}`);
         },
       }),
@@ -261,9 +299,11 @@ const plugin: Plugin = async (ctx) => {
           clear: schema.boolean().optional(),
           index: schema.number().optional(),
           tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional(),
         },
-        async execute({ selector, text, clear, index, tabId }, ctx) {
-          const data = await brokerRequest("tool", { tool: "type", args: { selector, text, clear, index, tabId } });
+        async execute({ selector, text, clear, index, tabId, timeoutMs, pollMs }, ctx) {
+          const data = await toolRequest("type", { selector, text, clear, index, tabId, timeoutMs, pollMs });
           return toolResultText(data, `Typed "${text}" into ${selector}`);
         },
       }),
@@ -277,12 +317,11 @@ const plugin: Plugin = async (ctx) => {
           optionIndex: schema.number().optional(),
           index: schema.number().optional(),
           tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional(),
         },
-        async execute({ selector, value, label, optionIndex, index, tabId }, ctx) {
-          const data = await brokerRequest("tool", {
-            tool: "select",
-            args: { selector, value, label, optionIndex, index, tabId },
-          });
+        async execute({ selector, value, label, optionIndex, index, tabId, timeoutMs, pollMs }, ctx) {
+          const data = await toolRequest("select", { selector, value, label, optionIndex, index, tabId, timeoutMs, pollMs });
           const summary = value ?? label ?? (optionIndex != null ? String(optionIndex) : "option");
           return toolResultText(data, `Selected ${summary} in ${selector}`);
         },
@@ -294,7 +333,7 @@ const plugin: Plugin = async (ctx) => {
           tabId: schema.number().optional(),
         },
         async execute({ tabId }, ctx) {
-          const data = await brokerRequest("tool", { tool: "screenshot", args: { tabId } });
+          const data = await toolRequest("screenshot", { tabId });
           return toolResultText(data, "Screenshot failed");
         },
       }),
@@ -305,7 +344,7 @@ const plugin: Plugin = async (ctx) => {
           tabId: schema.number().optional(),
         },
         async execute({ tabId }, ctx) {
-          const data = await brokerRequest("tool", { tool: "snapshot", args: { tabId } });
+          const data = await toolRequest("snapshot", { tabId });
           return toolResultText(data, "Snapshot failed");
         },
       }),
@@ -317,9 +356,11 @@ const plugin: Plugin = async (ctx) => {
           x: schema.number().optional(),
           y: schema.number().optional(),
           tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional(),
         },
-        async execute({ selector, x, y, tabId }, ctx) {
-          const data = await brokerRequest("tool", { tool: "scroll", args: { selector, x, y, tabId } });
+        async execute({ selector, x, y, tabId, timeoutMs, pollMs }, ctx) {
+          const data = await toolRequest("scroll", { selector, x, y, tabId, timeoutMs, pollMs });
           return toolResultText(data, "Scrolled");
         },
       }),
@@ -331,7 +372,7 @@ const plugin: Plugin = async (ctx) => {
           tabId: schema.number().optional(),
         },
         async execute({ ms, tabId }, ctx) {
-          const data = await brokerRequest("tool", { tool: "wait", args: { ms, tabId } });
+          const data = await toolRequest("wait", { ms, tabId });
           return toolResultText(data, "Waited");
         },
       }),
@@ -353,9 +394,18 @@ const plugin: Plugin = async (ctx) => {
           tabId: schema.number().optional(),
         },
         async execute({ selector, mode, attribute, property, index, limit, timeoutMs, pollMs, pattern, flags, tabId }, ctx) {
-          const data = await brokerRequest("tool", {
-            tool: "query",
-            args: { selector, mode, attribute, property, index, limit, timeoutMs, pollMs, pattern, flags, tabId },
+          const data = await toolRequest("query", {
+            selector,
+            mode,
+            attribute,
+            property,
+            index,
+            limit,
+            timeoutMs,
+            pollMs,
+            pattern,
+            flags,
+            tabId,
           });
           return toolResultText(data, "Query failed");
         },

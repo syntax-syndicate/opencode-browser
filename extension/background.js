@@ -140,6 +140,7 @@ async function runInPage(tabId, command, args) {
 async function pageOps(command, args) {
   const options = args || {}
   const MAX_DEPTH = 6
+  const DEFAULT_TIMEOUT_MS = 2000
 
   function safeString(value) {
     return typeof value === "string" ? value : ""
@@ -155,6 +156,48 @@ async function pageOps(command, args) {
       .map((s) => s.trim())
       .filter(Boolean)
     return parts.length ? parts : [selector.trim()].filter(Boolean)
+  }
+
+  function stripQuotes(value) {
+    return safeString(value).replace(/^['"]|['"]$/g, "")
+  }
+
+  function normalizeText(value) {
+    return safeString(value).replace(/\s+/g, " ").trim().toLowerCase()
+  }
+
+  function matchesText(value, target) {
+    if (!target) return false
+    const normTarget = normalizeText(target)
+    if (!normTarget) return false
+    const normValue = normalizeText(value)
+    return normValue === normTarget || normValue.includes(normTarget)
+  }
+
+  function normalizeLocatorKey(key) {
+    if (key === "css") return "css"
+    if (key === "label" || key === "field") return "label"
+    if (key === "aria" || key === "aria-label") return "aria"
+    if (key === "placeholder") return "placeholder"
+    if (key === "name") return "name"
+    if (key === "role") return "role"
+    if (key === "text") return "text"
+    if (key === "id") return "id"
+    return null
+  }
+
+  function parseLocator(raw) {
+    const trimmed = safeString(raw).trim()
+    if (!trimmed) return { kind: "css", value: "", raw: "" }
+    const match = trimmed.match(/^([a-zA-Z_-]+)\s*(=|:)\s*(.+)$/)
+    if (match) {
+      const key = match[1].toLowerCase()
+      const kind = normalizeLocatorKey(key)
+      if (kind) {
+        return { kind, value: stripQuotes(match[3]), raw: trimmed }
+      }
+    }
+    return { kind: "css", value: trimmed, raw: trimmed }
   }
 
   function isVisible(el) {
@@ -206,17 +249,133 @@ async function pageOps(command, args) {
     return out
   }
 
-  function resolveMatches(selectors, index) {
+  function getAriaLabelledByText(el) {
+    const ids = safeString(el?.getAttribute?.("aria-labelledby")).split(/\s+/).filter(Boolean)
+    if (!ids.length) return ""
+    const parts = []
+    for (const id of ids) {
+      const ref = document.getElementById(id)
+      if (ref) parts.push(ref.innerText || ref.textContent || "")
+    }
+    return parts.join(" ")
+  }
+
+  function findByAttribute(attr, target, allowedTags) {
+    if (!target) return []
+    const nodes = deepQuerySelectorAll(`[${attr}]`, document)
+    return nodes.filter((el) => {
+      if (Array.isArray(allowedTags) && allowedTags.length && !allowedTags.includes(el.tagName)) return false
+      return matchesText(el.getAttribute(attr), target)
+    })
+  }
+
+  function findByLabelText(target) {
+    if (!target) return []
+    const results = []
+    const seen = new Set()
+    const labels = deepQuerySelectorAll("label", document)
+    for (const label of labels) {
+      if (!matchesText(label.innerText || label.textContent || "", target)) continue
+      const control = label.control || label.querySelector("input, textarea, select")
+      if (control && !seen.has(control)) {
+        seen.add(control)
+        results.push(control)
+      }
+    }
+    const labelled = deepQuerySelectorAll("[aria-labelledby]", document)
+    for (const el of labelled) {
+      if (!matchesText(getAriaLabelledByText(el), target)) continue
+      if (!seen.has(el)) {
+        seen.add(el)
+        results.push(el)
+      }
+    }
+    return results
+  }
+
+  function findByRole(target) {
+    if (!target) return []
+    const nodes = deepQuerySelectorAll("[role]", document)
+    return nodes.filter((el) => matchesText(el.getAttribute("role"), target))
+  }
+
+  function findByName(target) {
+    return findByAttribute("name", target)
+  }
+
+  function findByText(target) {
+    if (!target) return []
+    const results = []
+    const seen = new Set()
+    const candidates = deepQuerySelectorAll(
+      "button, a, label, option, summary, [role='button'], [role='link'], [role='tab'], [role='menuitem']",
+      document
+    )
+    for (const el of candidates) {
+      if (!matchesText(el.innerText || el.textContent || "", target)) continue
+      if (!seen.has(el)) {
+        seen.add(el)
+        results.push(el)
+      }
+    }
+    const inputs = deepQuerySelectorAll("input[type='button'], input[type='submit'], input[type='reset']", document)
+    for (const el of inputs) {
+      if (!matchesText(el.value || "", target)) continue
+      if (!seen.has(el)) {
+        seen.add(el)
+        results.push(el)
+      }
+    }
+    return results
+  }
+
+  function resolveLocator(locator) {
+    if (locator.kind === "css") {
+      const value = safeString(locator.value)
+      if (!value) return []
+      return deepQuerySelectorAll(value, document)
+    }
+
+    if (locator.kind === "label") return findByLabelText(locator.value)
+    if (locator.kind === "aria") return findByAttribute("aria-label", locator.value)
+    if (locator.kind === "placeholder") return findByAttribute("placeholder", locator.value, ["INPUT", "TEXTAREA"])
+    if (locator.kind === "name") return findByName(locator.value)
+    if (locator.kind === "role") return findByRole(locator.value)
+    if (locator.kind === "text") return findByText(locator.value)
+
+    if (locator.kind === "id") {
+      const idValue = safeString(locator.value).trim()
+      if (!idValue) return []
+      const escaped = window.CSS && window.CSS.escape ? window.CSS.escape(idValue) : idValue.replace(/[^a-zA-Z0-9_-]/g, "\\$&")
+      return deepQuerySelectorAll(`#${escaped}`, document)
+    }
+
+    return []
+  }
+
+  function resolveMatchesOnce(selectors, index) {
     for (const sel of selectors) {
-      const s = safeString(sel)
-      if (!s) continue
-      const matches = deepQuerySelectorAll(s, document)
+      const locator = parseLocator(sel)
+      if (!locator.value) continue
+      const matches = resolveLocator(locator)
       if (!matches.length) continue
       const visible = matches.filter(isVisible)
-      const chosen = visible[index] || matches[index]
-      return { selectorUsed: s, matches, chosen }
+      const chosen = visible[index] || matches[index] || null
+      return { selectorUsed: locator.raw, matches, chosen }
     }
     return { selectorUsed: selectors[0] || "", matches: [], chosen: null }
+  }
+
+  async function resolveMatches(selectors, index, timeoutMs, pollMs) {
+    let match = resolveMatchesOnce(selectors, index)
+    if (timeoutMs > 0) {
+      const start = Date.now()
+      while (!match.matches.length && Date.now() - start < timeoutMs) {
+        await new Promise((r) => setTimeout(r, pollMs))
+        match = resolveMatchesOnce(selectors, index)
+      }
+    }
+    return match
   }
 
   function clickElement(el) {
@@ -333,14 +492,14 @@ async function pageOps(command, args) {
   const mode = typeof options.mode === "string" && options.mode ? options.mode : "text"
   const selectors = normalizeSelectorList(options.selector)
   const index = Number.isFinite(options.index) ? options.index : 0
-  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 0
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : DEFAULT_TIMEOUT_MS
   const pollMs = Number.isFinite(options.pollMs) ? options.pollMs : 200
   const limit = Number.isFinite(options.limit) ? options.limit : mode === "page_text" ? 20000 : 50
   const pattern = typeof options.pattern === "string" ? options.pattern : null
   const flags = typeof options.flags === "string" ? options.flags : "i"
 
   if (command === "click") {
-    const match = resolveMatches(selectors, index)
+    const match = await resolveMatches(selectors, index, timeoutMs, pollMs)
     if (!match.chosen) {
       return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
     }
@@ -351,7 +510,7 @@ async function pageOps(command, args) {
   if (command === "type") {
     const text = options.text
     const shouldClear = !!options.clear
-    const match = resolveMatches(selectors, index)
+    const match = await resolveMatches(selectors, index, timeoutMs, pollMs)
     if (!match.chosen) {
       return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
     }
@@ -393,7 +552,7 @@ async function pageOps(command, args) {
     const value = typeof options.value === "string" ? options.value : null
     const label = typeof options.label === "string" ? options.label : null
     const optionIndex = Number.isFinite(options.optionIndex) ? options.optionIndex : null
-    const match = resolveMatches(selectors, index)
+    const match = await resolveMatches(selectors, index, timeoutMs, pollMs)
     if (!match.chosen) {
       return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
     }
@@ -453,7 +612,7 @@ async function pageOps(command, args) {
     const scrollX = Number.isFinite(options.x) ? options.x : 0
     const scrollY = Number.isFinite(options.y) ? options.y : 0
     if (selectors.length) {
-      const match = resolveMatches(selectors, index)
+      const match = await resolveMatches(selectors, index, timeoutMs, pollMs)
       if (!match.chosen) {
         return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
       }
@@ -469,12 +628,7 @@ async function pageOps(command, args) {
   if (command === "query") {
     if (mode === "page_text") {
       if (selectors.length && timeoutMs > 0) {
-        const start = Date.now()
-        while (Date.now() - start < timeoutMs) {
-          const match = resolveMatches(selectors, index)
-          if (match.matches.length) break
-          await new Promise((r) => setTimeout(r, pollMs))
-        }
+        await resolveMatches(selectors, index, timeoutMs, pollMs)
       }
       return { ok: true, value: getPageText(limit, pattern, flags) }
     }
@@ -483,16 +637,7 @@ async function pageOps(command, args) {
       return { ok: false, error: "Selector is required" }
     }
 
-    let match = resolveMatches(selectors, index)
-    if (timeoutMs > 0) {
-      const start = Date.now()
-      while (Date.now() - start < timeoutMs) {
-        match = resolveMatches(selectors, index)
-        if (mode === "exists" && match.matches.length) break
-        if (mode !== "exists" && match.chosen) break
-        await new Promise((r) => setTimeout(r, pollMs))
-      }
-    }
+    const match = await resolveMatches(selectors, index, timeoutMs, pollMs)
 
     if (mode === "exists") {
       return {
@@ -586,35 +731,35 @@ async function toolNavigate({ url, tabId }) {
   return { tabId: tab.id, content: `Navigated to ${url}` }
 }
 
-async function toolClick({ selector, tabId, index = 0 }) {
+async function toolClick({ selector, tabId, index = 0, timeoutMs, pollMs }) {
   if (!selector) throw new Error("Selector is required")
   const tab = await getTabById(tabId)
 
-  const result = await runInPage(tab.id, "click", { selector, index })
+  const result = await runInPage(tab.id, "click", { selector, index, timeoutMs, pollMs })
   if (!result?.ok) throw new Error(result?.error || "Click failed")
   const used = result.selectorUsed || selector
   return { tabId: tab.id, content: `Clicked ${used}` }
 }
 
-async function toolType({ selector, text, tabId, clear = false, index = 0 }) {
+async function toolType({ selector, text, tabId, clear = false, index = 0, timeoutMs, pollMs }) {
   if (!selector) throw new Error("Selector is required")
   if (text === undefined) throw new Error("Text is required")
   const tab = await getTabById(tabId)
 
-  const result = await runInPage(tab.id, "type", { selector, text, clear, index })
+  const result = await runInPage(tab.id, "type", { selector, text, clear, index, timeoutMs, pollMs })
   if (!result?.ok) throw new Error(result?.error || "Type failed")
   const used = result.selectorUsed || selector
   return { tabId: tab.id, content: `Typed "${text}" into ${used}` }
 }
 
-async function toolSelect({ selector, value, label, optionIndex, tabId, index = 0 }) {
+async function toolSelect({ selector, value, label, optionIndex, tabId, index = 0, timeoutMs, pollMs }) {
   if (!selector) throw new Error("Selector is required")
   if (value === undefined && label === undefined && optionIndex === undefined) {
     throw new Error("value, label, or optionIndex is required")
   }
   const tab = await getTabById(tabId)
 
-  const result = await runInPage(tab.id, "select", { selector, value, label, optionIndex, index })
+  const result = await runInPage(tab.id, "select", { selector, value, label, optionIndex, index, timeoutMs, pollMs })
   if (!result?.ok) throw new Error(result?.error || "Select failed")
   const used = result.selectorUsed || selector
   const valueText = result.value ? String(result.value) : ""
@@ -820,10 +965,10 @@ async function toolQuery({
   return { tabId: tab.id, content: typeof result.value === "string" ? result.value : JSON.stringify(result.value) }
 }
 
-async function toolScroll({ x = 0, y = 0, selector, tabId }) {
+async function toolScroll({ x = 0, y = 0, selector, tabId, timeoutMs, pollMs }) {
   const tab = await getTabById(tabId)
 
-  const result = await runInPage(tab.id, "scroll", { x, y, selector })
+  const result = await runInPage(tab.id, "scroll", { x, y, selector, timeoutMs, pollMs })
   if (!result?.ok) throw new Error(result?.error || "Scroll failed")
   const target = result.selectorUsed ? `to ${result.selectorUsed}` : `by (${x}, ${y})`
   return { tabId: tab.id, content: `Scrolled ${target}` }

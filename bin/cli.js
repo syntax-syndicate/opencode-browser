@@ -26,7 +26,8 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline";
 import { createConnection } from "net";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
+import { createHash } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -34,6 +35,7 @@ const PACKAGE_ROOT = join(__dirname, "..");
 
 const BASE_DIR = join(homedir(), ".opencode-browser");
 const EXTENSION_DIR = join(BASE_DIR, "extension");
+const EXTENSION_MANIFEST_PATH = join(PACKAGE_ROOT, "extension", "manifest.json");
 const BROKER_DST = join(BASE_DIR, "broker.cjs");
 const NATIVE_HOST_DST = join(BASE_DIR, "native-host.cjs");
 const NATIVE_HOST_WRAPPER = join(BASE_DIR, "host-wrapper.sh");
@@ -90,6 +92,84 @@ function ask(question) {
 async function confirm(question) {
   const answer = await ask(`${question} (y/n): `);
   return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
+}
+
+function getFlagValue(flag) {
+  const index = process.argv.findIndex((arg) => arg === flag || arg.startsWith(`${flag}=`));
+  if (index === -1) return null;
+  const arg = process.argv[index];
+  if (arg.includes("=")) return arg.slice(arg.indexOf("=") + 1).trim() || null;
+  const next = process.argv[index + 1];
+  if (!next || next.startsWith("-")) return null;
+  return next.trim();
+}
+
+function getExtensionIdOverride() {
+  const cliValue = getFlagValue("--extension-id") || getFlagValue("-e");
+  if (cliValue) return cliValue;
+  const envValue = process.env.OPENCODE_BROWSER_EXTENSION_ID;
+  return envValue ? envValue.trim() : null;
+}
+
+function readExtensionManifest() {
+  try {
+    if (!existsSync(EXTENSION_MANIFEST_PATH)) return null;
+    return JSON.parse(readFileSync(EXTENSION_MANIFEST_PATH, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function computeExtensionIdFromKey(key) {
+  try {
+    const raw = String(key || "").trim();
+    if (!raw) return null;
+    const buffer = Buffer.from(raw, "base64");
+    if (!buffer.length) return null;
+    const hash = createHash("sha256").update(buffer).digest();
+    const bytes = hash.subarray(0, 16);
+    return Array.from(bytes)
+      .map((b) => {
+        const hi = b >> 4;
+        const lo = b & 15;
+        return String.fromCharCode(97 + hi) + String.fromCharCode(97 + lo);
+      })
+      .join("");
+  } catch {
+    return null;
+  }
+}
+
+function getExtensionIdFromManifest() {
+  const manifest = readExtensionManifest();
+  if (!manifest?.key) return null;
+  return computeExtensionIdFromKey(manifest.key);
+}
+
+async function resolveExtensionId({ allowPrompt = true, preferConfig = false } = {}) {
+  const override = getExtensionIdOverride();
+  if (override) return { id: override, source: "override" };
+
+  const config = loadConfig();
+  if (preferConfig && config?.extensionId) {
+    return { id: config.extensionId, source: "config" };
+  }
+
+  const manifestId = getExtensionIdFromManifest();
+  if (manifestId) {
+    return { id: manifestId, source: "manifest" };
+  }
+
+  if (!preferConfig && config?.extensionId) {
+    return { id: config.extensionId, source: "config" };
+  }
+
+  if (!allowPrompt) {
+    return { id: null, source: "missing" };
+  }
+
+  const extensionId = await ask(color("bright", "Paste Extension ID: "));
+  return { id: extensionId || null, source: extensionId ? "prompt" : "missing" };
 }
 
 function ensureDir(p) {
@@ -256,21 +336,38 @@ ${color("cyan", "Browser automation plugin (native messaging + per-tab ownership
 
   if (command === "install") {
     await install();
+  } else if (command === "update") {
+    await update();
   } else if (command === "uninstall") {
     await uninstall();
   } else if (command === "status") {
     await status();
+  } else if (command === "agent-install") {
+    await agentInstall();
+  } else if (command === "agent-gateway") {
+    await agentGateway();
   } else {
     log(`
 ${color("bright", "Usage:")}
   npx @different-ai/opencode-browser install
+  npx @different-ai/opencode-browser update
   npx @different-ai/opencode-browser status
   npx @different-ai/opencode-browser uninstall
+  npx @different-ai/opencode-browser agent-install
+  npx @different-ai/opencode-browser agent-gateway
+
+${color("bright", "Options:")}
+  --extension-id <id> (or OPENCODE_BROWSER_EXTENSION_ID)
 
 ${color("bright", "Quick Start:")}
   1. Run: npx @different-ai/opencode-browser install
   2. Restart OpenCode
   3. Use: browser_navigate / browser_click / browser_snapshot
+
+${color("bright", "Agent Mode:")}
+  1. Run: npx @different-ai/opencode-browser agent-install
+  2. Set OPENCODE_BROWSER_BACKEND=agent
+  3. Optionally run: npx @different-ai/opencode-browser agent-gateway
 `);
   }
 
@@ -311,9 +408,13 @@ After loading, ${color("bright", "pin the extension")}: open the Extensions menu
 
   await ask(color("bright", "Press Enter when you've loaded and pinned the extension..."));
 
-  header("Step 4: Get Extension ID");
+  header("Step 4: Extension ID");
 
-  log(`
+  let resolved = await resolveExtensionId({ allowPrompt: false, preferConfig: true });
+  let extensionId = resolved.id;
+
+  if (!extensionId) {
+    log(`
 We need the extension ID to register the native messaging host.
 
 Find it at ${color("cyan", "chrome://extensions")}:
@@ -322,7 +423,22 @@ Find it at ${color("cyan", "chrome://extensions")}:
 - Copy the ${color("bright", "ID")}
 `);
 
-  const extensionId = await ask(color("bright", "Paste Extension ID: "));
+    resolved = await resolveExtensionId({ allowPrompt: true, preferConfig: false });
+    extensionId = resolved.id;
+  } else if (resolved.source === "manifest") {
+    success(`Using fixed extension ID from manifest: ${extensionId}`);
+    log(`If you already loaded a different ID, rerun with --extension-id to override.`);
+  } else if (resolved.source === "config") {
+    success(`Using extension ID from config.json: ${extensionId}`);
+  } else if (resolved.source === "override") {
+    success(`Using extension ID override: ${extensionId}`);
+  }
+
+  if (!extensionId) {
+    error("Extension ID is required to continue.");
+    process.exit(1);
+  }
+
   if (!/^[a-p]{32}$/i.test(extensionId)) {
     warn("That doesn't look like a Chrome extension ID (expected 32 chars a-p). Continuing anyway.");
   }
@@ -539,10 +655,114 @@ Open Chrome and:
  ${color("bright", "Try it:")}
   Restart OpenCode and run: ${color("cyan", "browser_get_tabs")}
  `);
+ }
+
+async function update() {
+  header("Update: Check Platform");
+
+  const osName = platform();
+  if (osName !== "darwin" && osName !== "linux") {
+    error(`Unsupported platform: ${osName}`);
+    error("OpenCode Browser currently supports macOS and Linux only.");
+    process.exit(1);
+  }
+  success(`Platform: ${osName === "darwin" ? "macOS" : "Linux"}`);
+
+  header("Step 1: Copy Extension Files");
+
+  ensureDir(BASE_DIR);
+  const srcExtensionDir = join(PACKAGE_ROOT, "extension");
+  copyDirRecursive(srcExtensionDir, EXTENSION_DIR);
+  success(`Extension files copied to: ${EXTENSION_DIR}`);
+
+  header("Step 2: Resolve Extension ID");
+
+  let resolved = await resolveExtensionId({ allowPrompt: false, preferConfig: true });
+  let extensionId = resolved.id;
+
+  if (!extensionId) {
+    log(`
+We need the extension ID to register the native messaging host.
+
+Find it at ${color("cyan", "chrome://extensions")}:
+- Locate ${color("bright", "OpenCode Browser Automation")}
+- Click ${color("bright", "Details")}
+- Copy the ${color("bright", "ID")}
+`);
+
+    resolved = await resolveExtensionId({ allowPrompt: true, preferConfig: false });
+    extensionId = resolved.id;
+  } else if (resolved.source === "manifest") {
+    success(`Using fixed extension ID from manifest: ${extensionId}`);
+  } else if (resolved.source === "config") {
+    success(`Using extension ID from config.json: ${extensionId}`);
+  } else if (resolved.source === "override") {
+    success(`Using extension ID override: ${extensionId}`);
+  }
+
+  if (!extensionId) {
+    error("Extension ID is required to continue.");
+    process.exit(1);
+  }
+
+  if (!/^[a-p]{32}$/i.test(extensionId)) {
+    warn("That doesn't look like a Chrome extension ID (expected 32 chars a-p). Continuing anyway.");
+  }
+
+  const manifestId = getExtensionIdFromManifest();
+  if (resolved.source === "config" && manifestId && manifestId !== extensionId) {
+    warn(`Manifest key implies ${manifestId}, but config.json uses ${extensionId}. Run update with --extension-id ${manifestId} to switch.`);
+  }
+
+  header("Step 3: Install Local Host + Broker");
+
+  const brokerSrc = join(PACKAGE_ROOT, "bin", "broker.cjs");
+  const nativeHostSrc = join(PACKAGE_ROOT, "bin", "native-host.cjs");
+
+  copyFileSync(brokerSrc, BROKER_DST);
+  copyFileSync(nativeHostSrc, NATIVE_HOST_DST);
+
+  try {
+    chmodSync(BROKER_DST, 0o755);
+  } catch {}
+  try {
+    chmodSync(NATIVE_HOST_DST, 0o755);
+  } catch {}
+
+  success(`Updated broker: ${BROKER_DST}`);
+  success(`Updated native host: ${NATIVE_HOST_DST}`);
+
+  const nodePath = resolveNodePath();
+  if (!/node(\.exe)?$/.test(nodePath)) {
+    warn(`Node not detected; using ${nodePath}. Set OPENCODE_BROWSER_NODE if needed.`);
+  }
+  const hostPath = writeHostWrapper(nodePath);
+  success(`Updated host wrapper: ${hostPath}`);
+
+  saveConfig({ extensionId, installedAt: new Date().toISOString(), nodePath });
+
+  header("Step 4: Register Native Messaging Host");
+
+  const hostDirs = getNativeHostDirs(osName);
+  for (const dir of hostDirs) {
+    try {
+      writeNativeHostManifest(dir, extensionId, hostPath);
+      success(`Wrote native host manifest: ${nativeHostManifestPath(dir)}`);
+    } catch {
+      warn(`Could not write native host manifest to: ${dir}`);
+    }
+  }
+
+  header("Update Complete!");
+
+  log(`
+ Reload the extension in ${color("cyan", "chrome://extensions")} and restart OpenCode.
+ `);
 }
 
 
 async function status() {
+
   header("Status");
 
   success(`Base dir: ${BASE_DIR}`);
@@ -556,6 +776,11 @@ async function status() {
     success(`Configured extension ID: ${cfg.extensionId}`);
   } else {
     warn("No config.json found (run install)");
+  }
+
+  const manifestId = getExtensionIdFromManifest();
+  if (manifestId) {
+    success(`Fixed extension ID (manifest): ${manifestId}`);
   }
 
   if (cfg?.nodePath) {
@@ -575,6 +800,31 @@ async function status() {
   if (!foundAny) {
     warn("No native host manifest found. Run: npx @different-ai/opencode-browser install");
   }
+}
+
+async function agentInstall() {
+  header("Agent Browser Install");
+
+  const extraArgs = process.argv.slice(3).join(" ");
+  const command = `npx agent-browser install ${extraArgs}`.trim();
+  try {
+    execSync(command, { stdio: "inherit" });
+    success("agent-browser install completed.");
+  } catch (err) {
+    error(`agent-browser install failed: ${err?.message || err}`);
+  }
+}
+
+async function agentGateway() {
+  header("Agent Browser Gateway");
+
+  const gatewayPath = join(PACKAGE_ROOT, "bin", "agent-gateway.cjs");
+  success(`Starting gateway: ${gatewayPath}`);
+
+  await new Promise((resolve) => {
+    const child = spawn(process.execPath, [gatewayPath], { stdio: "inherit" });
+    child.on("exit", resolve);
+  });
 }
 
 async function uninstall() {
