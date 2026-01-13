@@ -22,7 +22,8 @@
     "build": "bun build src/plugin.ts --target=node --outfile=dist/plugin.js",
     "install": "node bin/cli.js install",
     "uninstall": "node bin/cli.js uninstall",
-    "status": "node bin/cli.js status"
+    "status": "node bin/cli.js status",
+    "tool-test": "bun bin/tool-test.ts"
   },
   "keywords": [
     "opencode",
@@ -44,6 +45,9 @@
   "homepage": "https://github.com/different-ai/opencode-browser#readme",
   "peerDependencies": {
     "@opencode-ai/plugin": "*"
+  },
+  "dependencies": {
+    "agent-browser": "^0.4.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "*",
