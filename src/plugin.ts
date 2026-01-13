@@ -165,6 +165,13 @@ async function brokerRequest(op: string, payload: Record<string, any>): Promise<
   });
 }
 
+async function brokerOnlyRequest(op: string, payload: Record<string, any>): Promise<any> {
+  if (USE_AGENT_BACKEND) {
+    throw new Error("Tab claims are not supported with agent-browser backend");
+  }
+  return await brokerRequest(op, payload);
+}
+
 function toolResultText(data: any, fallback: string): string {
   if (typeof data?.content === "string") return data.content;
   if (typeof data === "string") return data;
@@ -249,6 +256,38 @@ const plugin: Plugin = async (ctx) => {
         async execute(args, ctx) {
           const data = await toolRequest("get_tabs", {});
           return toolResultText(data, "ok");
+        },
+      }),
+
+      browser_list_claims: tool({
+        description: "List tab ownership claims",
+        args: {},
+        async execute(args, ctx) {
+          const data = await brokerOnlyRequest("list_claims", {});
+          return JSON.stringify(data);
+        },
+      }),
+
+      browser_claim_tab: tool({
+        description: "Claim a browser tab for this session",
+        args: {
+          tabId: schema.number(),
+          force: schema.boolean().optional(),
+        },
+        async execute({ tabId, force }, ctx) {
+          const data = await brokerOnlyRequest("claim_tab", { tabId, force });
+          return JSON.stringify(data);
+        },
+      }),
+
+      browser_release_tab: tool({
+        description: "Release a claimed browser tab",
+        args: {
+          tabId: schema.number(),
+        },
+        async execute({ tabId }, ctx) {
+          const data = await brokerOnlyRequest("release_tab", { tabId });
+          return JSON.stringify(data);
         },
       }),
 

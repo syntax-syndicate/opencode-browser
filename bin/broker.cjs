@@ -11,6 +11,20 @@ const SOCKET_PATH = path.join(BASE_DIR, "broker.sock");
 
 fs.mkdirSync(BASE_DIR, { recursive: true });
 
+const DEFAULT_LEASE_TTL_MS = 5 * 60 * 1000;
+const LEASE_TTL_MS = (() => {
+  const raw = process.env.OPENCODE_BROWSER_CLAIM_TTL_MS;
+  const value = Number(raw);
+  if (Number.isFinite(value) && value >= 0) return value;
+  return DEFAULT_LEASE_TTL_MS;
+})();
+const LEASE_SWEEP_MS =
+  LEASE_TTL_MS > 0 ? Math.min(Math.max(10000, Math.floor(LEASE_TTL_MS / 2)), 60000) : 0;
+
+function nowMs() {
+  return Date.now();
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -39,7 +53,7 @@ function writeJsonLine(socket, msg) {
 }
 
 function wantsTab(toolName) {
-  return !["get_tabs", "get_active_tab"].includes(toolName);
+  return !["get_tabs", "get_active_tab", "open_tab"].includes(toolName);
 }
 
 // --- State ---
@@ -49,22 +63,78 @@ const extPending = new Map(); // extId -> { pluginSocket, pluginRequestId, sessi
 
 const clients = new Set();
 
-// Tab ownership: tabId -> { sessionId, claimedAt }
+// Tab ownership: tabId -> { sessionId, claimedAt, lastSeenAt }
 const claims = new Map();
+// Session state: sessionId -> { defaultTabId, lastSeenAt }
+const sessionState = new Map();
 
 function listClaims() {
   const out = [];
   for (const [tabId, info] of claims.entries()) {
-    out.push({ tabId, ...info });
+    out.push({
+      tabId,
+      sessionId: info.sessionId,
+      claimedAt: info.claimedAt,
+      lastSeenAt: new Date(info.lastSeenAt).toISOString(),
+    });
   }
   out.sort((a, b) => a.tabId - b.tabId);
   return out;
+}
+
+function sessionHasClaims(sessionId) {
+  for (const info of claims.values()) {
+    if (info.sessionId === sessionId) return true;
+  }
+  return false;
+}
+
+function getSessionState(sessionId) {
+  if (!sessionId) return null;
+  let state = sessionState.get(sessionId);
+  if (!state) {
+    state = { defaultTabId: null, lastSeenAt: nowMs() };
+    sessionState.set(sessionId, state);
+  }
+  return state;
+}
+
+function touchSession(sessionId) {
+  const state = getSessionState(sessionId);
+  if (!state) return null;
+  state.lastSeenAt = nowMs();
+  return state;
+}
+
+function setDefaultTab(sessionId, tabId) {
+  const state = getSessionState(sessionId);
+  if (!state) return;
+  state.defaultTabId = tabId;
+  state.lastSeenAt = nowMs();
+}
+
+function clearDefaultTab(sessionId, tabId) {
+  const state = sessionState.get(sessionId);
+  if (!state) return;
+  if (tabId === undefined || state.defaultTabId === tabId) {
+    state.defaultTabId = null;
+  }
+  state.lastSeenAt = nowMs();
+}
+
+function releaseClaim(tabId) {
+  const info = claims.get(tabId);
+  if (!info) return;
+  claims.delete(tabId);
+  clearDefaultTab(info.sessionId, tabId);
 }
 
 function releaseClaimsForSession(sessionId) {
   for (const [tabId, info] of claims.entries()) {
     if (info.sessionId === sessionId) claims.delete(tabId);
   }
+  clearDefaultTab(sessionId);
+  sessionState.delete(sessionId);
 }
 
 function checkClaim(tabId, sessionId) {
@@ -75,7 +145,37 @@ function checkClaim(tabId, sessionId) {
 }
 
 function setClaim(tabId, sessionId) {
-  claims.set(tabId, { sessionId, claimedAt: nowIso() });
+  const existing = claims.get(tabId);
+  claims.set(tabId, {
+    sessionId,
+    claimedAt: existing ? existing.claimedAt : nowIso(),
+    lastSeenAt: nowMs(),
+  });
+}
+
+function touchClaim(tabId, sessionId) {
+  const existing = claims.get(tabId);
+  if (existing && existing.sessionId !== sessionId) return;
+  if (existing) {
+    existing.lastSeenAt = nowMs();
+  } else {
+    setClaim(tabId, sessionId);
+  }
+}
+
+function cleanupStaleClaims() {
+  if (!LEASE_TTL_MS) return;
+  const now = nowMs();
+  for (const [tabId, info] of claims.entries()) {
+    if (now - info.lastSeenAt > LEASE_TTL_MS) {
+      releaseClaim(tabId);
+    }
+  }
+  for (const [sessionId, state] of sessionState.entries()) {
+    if (!sessionHasClaims(sessionId) && now - state.lastSeenAt > LEASE_TTL_MS) {
+      sessionState.delete(sessionId);
+    }
+  }
 }
 
 function ensureHost() {
@@ -117,25 +217,47 @@ async function handleTool(pluginSocket, req) {
   const { tool, args = {}, sessionId } = req;
   if (!tool) throw new Error("Missing tool");
 
+  if (sessionId) touchSession(sessionId);
+
   let tabId = args.tabId;
+  const toolArgs = { ...args };
+
+  if (tool === "open_tab" && toolArgs.active !== false) {
+    const activeTabId = await resolveActiveTab(sessionId);
+    const claimCheck = checkClaim(activeTabId, sessionId);
+    if (!claimCheck.ok) {
+      toolArgs.active = false;
+    }
+  }
 
   if (wantsTab(tool)) {
     if (typeof tabId !== "number") {
-      tabId = await resolveActiveTab(sessionId);
+      const state = getSessionState(sessionId);
+      const defaultTabId = state && Number.isFinite(state.defaultTabId) ? state.defaultTabId : null;
+      if (Number.isFinite(defaultTabId)) {
+        tabId = defaultTabId;
+      } else {
+        const activeTabId = await resolveActiveTab(sessionId);
+        const claimCheck = checkClaim(activeTabId, sessionId);
+        if (!claimCheck.ok) {
+          throw new Error(`${claimCheck.error}. No default tab for session; open a new tab or claim one.`);
+        }
+        tabId = activeTabId;
+        setDefaultTab(sessionId, tabId);
+      }
     }
 
     const claimCheck = checkClaim(tabId, sessionId);
     if (!claimCheck.ok) throw new Error(claimCheck.error);
   }
 
-  const res = await callExtension(tool, { ...args, tabId }, sessionId);
+  const res = await callExtension(tool, { ...toolArgs, tabId }, sessionId);
 
   const usedTabId =
     res && typeof res.tabId === "number" ? res.tabId : typeof tabId === "number" ? tabId : undefined;
   if (typeof usedTabId === "number") {
-    // Auto-claim on first touch
-    const existing = claims.get(usedTabId);
-    if (!existing) setClaim(usedTabId, sessionId);
+    touchClaim(usedTabId, sessionId);
+    setDefaultTab(sessionId, usedTabId);
   }
 
   return res;
@@ -145,6 +267,7 @@ function handleClientMessage(socket, client, msg) {
   if (msg && msg.type === "hello") {
     client.role = msg.role || "unknown";
     client.sessionId = msg.sessionId;
+    if (client.sessionId) touchSession(client.sessionId);
     if (client.role === "native-host") {
       host = { socket };
       // allow host to see current state
@@ -174,6 +297,7 @@ function handleClientMessage(socket, client, msg) {
   if (msg && msg.type === "request" && typeof msg.id === "number") {
     const requestId = msg.id;
     const sessionId = msg.sessionId || client.sessionId;
+    if (sessionId) touchSession(sessionId);
 
     const replyOk = (data) => writeJsonLine(socket, { type: "response", id: requestId, ok: true, data });
     const replyErr = (err) =>
@@ -182,7 +306,21 @@ function handleClientMessage(socket, client, msg) {
     (async () => {
       try {
         if (msg.op === "status") {
-          replyOk({ broker: true, hostConnected: !!host && !!host.socket && !host.socket.destroyed, claims: listClaims() });
+          const state = sessionId ? sessionState.get(sessionId) : null;
+          const sessionInfo = state
+            ? {
+                sessionId,
+                defaultTabId: state.defaultTabId,
+                lastSeenAt: new Date(state.lastSeenAt).toISOString(),
+              }
+            : null;
+          replyOk({
+            broker: true,
+            hostConnected: !!host && !!host.socket && !host.socket.destroyed,
+            claims: listClaims(),
+            leaseTtlMs: LEASE_TTL_MS,
+            session: sessionInfo,
+          });
           return;
         }
 
@@ -199,7 +337,11 @@ function handleClientMessage(socket, client, msg) {
           if (existing && existing.sessionId !== sessionId && !force) {
             throw new Error(`Tab ${tabId} is owned by another OpenCode session (${existing.sessionId})`);
           }
+          if (existing && existing.sessionId !== sessionId && force) {
+            clearDefaultTab(existing.sessionId, tabId);
+          }
           setClaim(tabId, sessionId);
+          setDefaultTab(sessionId, tabId);
           replyOk({ ok: true, tabId, sessionId });
           return;
         }
@@ -215,7 +357,7 @@ function handleClientMessage(socket, client, msg) {
           if (existing.sessionId !== sessionId) {
             throw new Error(`Tab ${tabId} is owned by another OpenCode session (${existing.sessionId})`);
           }
-          claims.delete(tabId);
+          releaseClaim(tabId);
           replyOk({ ok: true, tabId, released: true });
           return;
         }
@@ -285,6 +427,11 @@ function start() {
     console.error("[browser-broker] server error", err);
     process.exit(1);
   });
+}
+
+if (LEASE_TTL_MS > 0 && LEASE_SWEEP_MS > 0) {
+  const timer = setInterval(cleanupStaleClaims, LEASE_SWEEP_MS);
+  if (typeof timer.unref === "function") timer.unref();
 }
 
 start();

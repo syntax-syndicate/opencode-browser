@@ -112,14 +112,19 @@ export OPENCODE_BROWSER_AGENT_PORT=9833
 ## Per-tab ownership
 
 - First time a session touches a tab, the broker **auto-claims** it for that session.
-- Other sessions attempting to use the same tab will get an error.
-- Use `browser_status` to inspect claims if needed.
+- Each session tracks a default tab; tools without `tabId` route to it.
+- `browser_open_tab` always works; if another session owns the active tab, the new tab opens in the background.
+- Claims expire after inactivity (`OPENCODE_BROWSER_CLAIM_TTL_MS`, default 5 minutes).
+- Use `browser_status` or `browser_list_claims` to inspect claims if needed.
 
 ## Available tools
 
 Core primitives:
 - `browser_status`
 - `browser_get_tabs`
+- `browser_list_claims`
+- `browser_claim_tab`
+- `browser_release_tab`
 - `browser_open_tab`
 - `browser_navigate`
 - `browser_query` (modes: `text`, `value`, `list`, `exists`, `page_text`; optional `timeoutMs`/`pollMs`)
@@ -157,8 +162,8 @@ Diagnostics:
 - If you loaded a custom extension ID, rerun with `--extension-id <id>`
 
 **Tab ownership errors**
-- Use `browser_status` to see current claims
-- Close the other OpenCode session to release ownership
+- Use `browser_status` or `browser_list_claims` to see current claims
+- Use `browser_release_tab` or close the other OpenCode session to release ownership
 
 ## Uninstall
 
