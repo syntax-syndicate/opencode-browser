@@ -1,6 +1,6 @@
 {
   "name": "@different-ai/opencode-browser",
-  "version": "4.4.0",
+  "version": "4.5.0",
   "description": "Browser automation plugin for OpenCode (native messaging + per-tab ownership).",
   "type": "module",
   "bin": {
@@ -20,6 +20,8 @@
   ],
   "scripts": {
     "build": "bun build src/plugin.ts --target=node --outfile=dist/plugin.js",
+    "prepublishOnly": "bun run build",
+    "publish": "node -e \"const argv=(() => { try { return JSON.parse(process.env.npm_config_argv || '{}').original || []; } catch { return []; } })(); if (argv.length === 1 && argv[0] === 'publish') process.exit(0); require('child_process').execSync('npm publish --access public', { stdio: 'inherit' });\"",
     "install": "node bin/cli.js install",
     "uninstall": "node bin/cli.js uninstall",
     "status": "node bin/cli.js status",
