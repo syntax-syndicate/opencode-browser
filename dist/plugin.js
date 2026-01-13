@@ -12864,6 +12864,14 @@ function createAgentBackend(sessionId) {
         }
         return { content: { tabId: created.index, url: args.url, active: active !== false } };
       }
+      case "close_tab": {
+        const payload = {};
+        if (Number.isFinite(args.tabId))
+          payload.index = args.tabId;
+        const result = await agentCommand("tab_close", payload);
+        const closed = Number.isFinite(result?.closed) ? result.closed : args.tabId;
+        return { content: { tabId: closed, remaining: result?.remaining } };
+      }
       case "navigate": {
         return await withTab(args.tabId, async () => {
           if (!args.url)
@@ -13266,6 +13274,16 @@ var plugin = async (ctx) => {
         async execute({ url: url2, active }, ctx2) {
           const data = await toolRequest("open_tab", { url: url2, active });
           return toolResultText(data, "Opened new tab");
+        }
+      }),
+      browser_close_tab: tool({
+        description: "Close a browser tab owned by this session",
+        args: {
+          tabId: schema.number().optional()
+        },
+        async execute({ tabId }, ctx2) {
+          const data = await toolRequest("close_tab", { tabId });
+          return toolResultText(data, "Closed tab");
         }
       }),
       browser_navigate: tool({
