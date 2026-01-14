@@ -1,7 +1,7 @@
 import net from "net";
-import { readFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { mkdirSync, readFileSync } from "fs";
+import { homedir, tmpdir } from "os";
+import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { spawn } from "child_process";
 import { createRequire } from "module";
 
@@ -23,6 +23,9 @@ const REQUEST_TIMEOUT_MS = 60000;
 const DEFAULT_PAGE_TEXT_LIMIT = 20000;
 const DEFAULT_LIST_LIMIT = 50;
 const DEFAULT_POLL_MS = 200;
+
+const BASE_DIR = join(homedir(), ".opencode-browser");
+const DEFAULT_DOWNLOADS_DIR = join(BASE_DIR, "downloads");
 
 export type AgentBackend = {
   mode: "agent";
@@ -385,6 +388,38 @@ export function createAgentBackend(sessionId: string): AgentBackend {
   const session = getAgentSession(sessionId);
   const connection = getAgentConnectionInfo(session);
 
+  const downloadsDir = (() => {
+    const raw = process.env.OPENCODE_BROWSER_AGENT_DOWNLOADS_DIR?.trim();
+    if (!raw) return DEFAULT_DOWNLOADS_DIR;
+    return isAbsolute(raw) ? raw : resolve(process.cwd(), raw);
+  })();
+
+  mkdirSync(downloadsDir, { recursive: true });
+
+  const downloads: Array<{ path: string; filename?: string; url?: string; timestamp: string }> = [];
+
+  function resolveDownloadPath(filename?: string, urlValue?: string): string {
+    let name = typeof filename === "string" ? filename.trim() : "";
+    if (!name && typeof urlValue === "string") {
+      try {
+        const u = new URL(urlValue);
+        name = basename(u.pathname) || "";
+      } catch {
+        // ignore
+      }
+    }
+    if (!name) name = `download-${Date.now()}`;
+
+    const fullPath = isAbsolute(name) ? name : join(downloadsDir, name);
+    mkdirSync(dirname(fullPath), { recursive: true });
+    return fullPath;
+  }
+
+  function recordDownload(entry: { path: string; filename?: string; url?: string }): void {
+    downloads.unshift({ ...entry, timestamp: new Date().toISOString() });
+    if (downloads.length > 50) downloads.length = 50;
+  }
+
   let agentSocket: net.Socket | null = null;
   let agentReqId = 0;
   const agentPending = new Map<string, PendingRequest>();
@@ -612,6 +647,9 @@ export function createAgentBackend(sessionId: string): AgentBackend {
         }));
         return { content: JSON.stringify(mapped, null, 2) };
       }
+      case "list_downloads": {
+        return { content: JSON.stringify({ downloads }, null, 2) };
+      }
       case "open_tab": {
         const active = args.active;
         let previousActive: number | null = null;
@@ -640,6 +678,50 @@ export function createAgentBackend(sessionId: string): AgentBackend {
           if (!args.url) throw new Error("URL is required");
           await agentCommand("navigate", { url: args.url });
           return { content: `Navigated to ${args.url}` };
+        });
+      }
+      case "download": {
+        return await withTab(args.tabId, async () => {
+          const url = typeof args.url === "string" ? args.url.trim() : "";
+          const selector = typeof args.selector === "string" ? args.selector.trim() : "";
+          const filename = typeof args.filename === "string" ? args.filename.trim() : "";
+          const waitValue = args.wait === undefined ? false : !!args.wait;
+          const timeoutValue = Number.isFinite(args.downloadTimeoutMs) ? args.downloadTimeoutMs : undefined;
+
+          if (!url && !selector) throw new Error("url or selector is required");
+          if (url && selector) throw new Error("Provide either url or selector, not both");
+
+          if (!waitValue) {
+            if (selector) {
+              await agentCommand("click", { selector });
+              return { content: JSON.stringify({ ok: true, started: true, selector }, null, 2) };
+            }
+            await agentCommand("navigate", { url });
+            return { content: JSON.stringify({ ok: true, started: true, url }, null, 2) };
+          }
+
+          if (selector) {
+            const path = resolveDownloadPath(filename || undefined);
+            const data = await agentCommand("download", { selector, path });
+            const entry = {
+              path: String(data?.path || path),
+              filename: typeof data?.suggestedFilename === "string" ? data.suggestedFilename : undefined,
+              url: url || undefined,
+            };
+            recordDownload({ path: entry.path, filename: entry.filename, url: entry.url });
+            return { content: JSON.stringify({ ok: true, ...entry }, null, 2) };
+          }
+
+          const path = resolveDownloadPath(filename || undefined, url);
+          await agentCommand("navigate", { url });
+          const data = await agentCommand("waitfordownload", { path, timeout: timeoutValue });
+          const entry = {
+            path: String(data?.path || path),
+            filename: typeof data?.filename === "string" ? data.filename : undefined,
+            url: typeof data?.url === "string" ? data.url : url,
+          };
+          recordDownload({ path: entry.path, filename: entry.filename, url: entry.url });
+          return { content: JSON.stringify({ ok: true, ...entry }, null, 2) };
         });
       }
       case "click": {
@@ -710,6 +792,19 @@ export function createAgentBackend(sessionId: string): AgentBackend {
               ? `${labelText} (${valueText})`
               : labelText || valueText || "option";
           return { content: `Selected ${summary} in ${args.selector}` };
+        });
+      }
+      case "set_file_input": {
+        return await withTab(args.tabId, async () => {
+          if (!args.selector) throw new Error("Selector is required");
+          if (!args.filePath) throw new Error("filePath is required");
+          const rawPath = String(args.filePath).trim();
+          if (!rawPath) throw new Error("filePath is required");
+          const absPath = isAbsolute(rawPath) ? rawPath : resolve(process.cwd(), rawPath);
+          const data = await agentCommand("upload", { selector: args.selector, files: absPath });
+          return {
+            content: JSON.stringify({ ok: true, selector: args.selector, uploaded: data?.uploaded ?? [absPath] }, null, 2),
+          };
         });
       }
       case "screenshot": {

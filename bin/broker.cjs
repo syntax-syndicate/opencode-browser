@@ -53,7 +53,7 @@ function writeJsonLine(socket, msg) {
 }
 
 function wantsTab(toolName) {
-  return !["get_tabs", "get_active_tab", "open_tab"].includes(toolName);
+  return !["get_tabs", "get_active_tab", "open_tab", "list_downloads"].includes(toolName);
 }
 
 // --- State ---

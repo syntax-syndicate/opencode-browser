@@ -9,7 +9,7 @@ var __export = (target, all) => {
     });
 };
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/external.js
+// node_modules/zod/v4/classic/external.js
 var exports_external = {};
 __export(exports_external, {
   xid: () => xid2,
@@ -239,7 +239,7 @@ __export(exports_external, {
   $brand: () => $brand
 });
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/index.js
+// node_modules/zod/v4/core/index.js
 var exports_core2 = {};
 __export(exports_core2, {
   version: () => version,
@@ -503,7 +503,7 @@ __export(exports_core2, {
   $ZodAny: () => $ZodAny
 });
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/core.js
+// node_modules/zod/v4/core/core.js
 var NEVER = Object.freeze({
   status: "aborted"
 });
@@ -570,7 +570,7 @@ function config(newConfig) {
     Object.assign(globalConfig, newConfig);
   return globalConfig;
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/util.js
+// node_modules/zod/v4/core/util.js
 var exports_util = {};
 __export(exports_util, {
   unwrapMessage: () => unwrapMessage,
@@ -1199,7 +1199,7 @@ class Class {
   constructor(..._args) {}
 }
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/errors.js
+// node_modules/zod/v4/core/errors.js
 var initializer = (inst, def) => {
   inst.name = "$ZodError";
   Object.defineProperty(inst, "_zod", {
@@ -1342,7 +1342,7 @@ function prettifyError(error) {
 `);
 }
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/parse.js
+// node_modules/zod/v4/core/parse.js
 var _parse = (_Err) => (schema, value, _ctx, _params) => {
   const ctx = _ctx ? Object.assign(_ctx, { async: false }) : { async: false };
   const result = schema._zod.run({ value, issues: [] }, ctx);
@@ -1429,7 +1429,7 @@ var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
   return _safeParseAsync(_Err)(schema, value, _ctx);
 };
 var safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync($ZodRealError);
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/regexes.js
+// node_modules/zod/v4/core/regexes.js
 var exports_regexes = {};
 __export(exports_regexes, {
   xid: () => xid,
@@ -1581,7 +1581,7 @@ var sha512_hex = /^[0-9a-fA-F]{128}$/;
 var sha512_base64 = /* @__PURE__ */ fixedBase64(86, "==");
 var sha512_base64url = /* @__PURE__ */ fixedBase64url(86);
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/checks.js
+// node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
   var _a;
   inst._zod ?? (inst._zod = {});
@@ -2122,7 +2122,7 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
   };
 });
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/doc.js
+// node_modules/zod/v4/core/doc.js
 class Doc {
   constructor(args = []) {
     this.content = [];
@@ -2160,14 +2160,14 @@ class Doc {
   }
 }
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/versions.js
+// node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
   minor: 1,
   patch: 8
 };
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/schemas.js
+// node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   var _a;
   inst ?? (inst = {});
@@ -3990,7 +3990,7 @@ function handleRefineResult(result, payload, input, inst) {
     payload.issues.push(issue(_iss));
   }
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/index.js
+// node_modules/zod/v4/locales/index.js
 var exports_locales = {};
 __export(exports_locales, {
   zhTW: () => zh_TW_default,
@@ -4041,7 +4041,7 @@ __export(exports_locales, {
   ar: () => ar_default
 });
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ar.js
+// node_modules/zod/v4/locales/ar.js
 var error = () => {
   const Sizable = {
     string: { unit: "حرف", verb: "أن يحوي" },
@@ -4157,7 +4157,7 @@ function ar_default() {
     localeError: error()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/az.js
+// node_modules/zod/v4/locales/az.js
 var error2 = () => {
   const Sizable = {
     string: { unit: "simvol", verb: "olmalıdır" },
@@ -4272,7 +4272,7 @@ function az_default() {
     localeError: error2()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/be.js
+// node_modules/zod/v4/locales/be.js
 function getBelarusianPlural(count, one, few, many) {
   const absCount = Math.abs(count);
   const lastDigit = absCount % 10;
@@ -4436,7 +4436,7 @@ function be_default() {
     localeError: error3()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ca.js
+// node_modules/zod/v4/locales/ca.js
 var error4 = () => {
   const Sizable = {
     string: { unit: "caràcters", verb: "contenir" },
@@ -4553,7 +4553,7 @@ function ca_default() {
     localeError: error4()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/cs.js
+// node_modules/zod/v4/locales/cs.js
 var error5 = () => {
   const Sizable = {
     string: { unit: "znaků", verb: "mít" },
@@ -4688,7 +4688,7 @@ function cs_default() {
     localeError: error5()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/da.js
+// node_modules/zod/v4/locales/da.js
 var error6 = () => {
   const Sizable = {
     string: { unit: "tegn", verb: "havde" },
@@ -4819,7 +4819,7 @@ function da_default() {
     localeError: error6()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/de.js
+// node_modules/zod/v4/locales/de.js
 var error7 = () => {
   const Sizable = {
     string: { unit: "Zeichen", verb: "zu haben" },
@@ -4935,7 +4935,7 @@ function de_default() {
     localeError: error7()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/en.js
+// node_modules/zod/v4/locales/en.js
 var parsedType = (data) => {
   const t = typeof data;
   switch (t) {
@@ -5052,7 +5052,7 @@ function en_default() {
     localeError: error8()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/eo.js
+// node_modules/zod/v4/locales/eo.js
 var parsedType2 = (data) => {
   const t = typeof data;
   switch (t) {
@@ -5168,7 +5168,7 @@ function eo_default() {
     localeError: error9()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/es.js
+// node_modules/zod/v4/locales/es.js
 var error10 = () => {
   const Sizable = {
     string: { unit: "caracteres", verb: "tener" },
@@ -5316,7 +5316,7 @@ function es_default() {
     localeError: error10()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/fa.js
+// node_modules/zod/v4/locales/fa.js
 var error11 = () => {
   const Sizable = {
     string: { unit: "کاراکتر", verb: "داشته باشد" },
@@ -5438,7 +5438,7 @@ function fa_default() {
     localeError: error11()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/fi.js
+// node_modules/zod/v4/locales/fi.js
 var error12 = () => {
   const Sizable = {
     string: { unit: "merkkiä", subject: "merkkijonon" },
@@ -5560,7 +5560,7 @@ function fi_default() {
     localeError: error12()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/fr.js
+// node_modules/zod/v4/locales/fr.js
 var error13 = () => {
   const Sizable = {
     string: { unit: "caractères", verb: "avoir" },
@@ -5676,7 +5676,7 @@ function fr_default() {
     localeError: error13()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/fr-CA.js
+// node_modules/zod/v4/locales/fr-CA.js
 var error14 = () => {
   const Sizable = {
     string: { unit: "caractères", verb: "avoir" },
@@ -5793,7 +5793,7 @@ function fr_CA_default() {
     localeError: error14()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/he.js
+// node_modules/zod/v4/locales/he.js
 var error15 = () => {
   const Sizable = {
     string: { unit: "אותיות", verb: "לכלול" },
@@ -5909,7 +5909,7 @@ function he_default() {
     localeError: error15()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/hu.js
+// node_modules/zod/v4/locales/hu.js
 var error16 = () => {
   const Sizable = {
     string: { unit: "karakter", verb: "legyen" },
@@ -6025,7 +6025,7 @@ function hu_default() {
     localeError: error16()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/id.js
+// node_modules/zod/v4/locales/id.js
 var error17 = () => {
   const Sizable = {
     string: { unit: "karakter", verb: "memiliki" },
@@ -6141,7 +6141,7 @@ function id_default() {
     localeError: error17()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/is.js
+// node_modules/zod/v4/locales/is.js
 var parsedType3 = (data) => {
   const t = typeof data;
   switch (t) {
@@ -6258,7 +6258,7 @@ function is_default() {
     localeError: error18()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/it.js
+// node_modules/zod/v4/locales/it.js
 var error19 = () => {
   const Sizable = {
     string: { unit: "caratteri", verb: "avere" },
@@ -6374,7 +6374,7 @@ function it_default() {
     localeError: error19()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ja.js
+// node_modules/zod/v4/locales/ja.js
 var error20 = () => {
   const Sizable = {
     string: { unit: "文字", verb: "である" },
@@ -6489,7 +6489,7 @@ function ja_default() {
     localeError: error20()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ka.js
+// node_modules/zod/v4/locales/ka.js
 var parsedType4 = (data) => {
   const t = typeof data;
   switch (t) {
@@ -6614,7 +6614,7 @@ function ka_default() {
     localeError: error21()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/km.js
+// node_modules/zod/v4/locales/km.js
 var error22 = () => {
   const Sizable = {
     string: { unit: "តួអក្សរ", verb: "គួរមាន" },
@@ -6732,11 +6732,11 @@ function km_default() {
   };
 }
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/kh.js
+// node_modules/zod/v4/locales/kh.js
 function kh_default() {
   return km_default();
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ko.js
+// node_modules/zod/v4/locales/ko.js
 var error23 = () => {
   const Sizable = {
     string: { unit: "문자", verb: "to have" },
@@ -6857,7 +6857,7 @@ function ko_default() {
     localeError: error23()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/lt.js
+// node_modules/zod/v4/locales/lt.js
 var parsedType5 = (data) => {
   const t = typeof data;
   return parsedTypeFromType(t, data);
@@ -7086,7 +7086,7 @@ function lt_default() {
     localeError: error24()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/mk.js
+// node_modules/zod/v4/locales/mk.js
 var error25 = () => {
   const Sizable = {
     string: { unit: "знаци", verb: "да имаат" },
@@ -7203,7 +7203,7 @@ function mk_default() {
     localeError: error25()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ms.js
+// node_modules/zod/v4/locales/ms.js
 var error26 = () => {
   const Sizable = {
     string: { unit: "aksara", verb: "mempunyai" },
@@ -7319,7 +7319,7 @@ function ms_default() {
     localeError: error26()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/nl.js
+// node_modules/zod/v4/locales/nl.js
 var error27 = () => {
   const Sizable = {
     string: { unit: "tekens" },
@@ -7436,7 +7436,7 @@ function nl_default() {
     localeError: error27()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/no.js
+// node_modules/zod/v4/locales/no.js
 var error28 = () => {
   const Sizable = {
     string: { unit: "tegn", verb: "å ha" },
@@ -7552,7 +7552,7 @@ function no_default() {
     localeError: error28()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ota.js
+// node_modules/zod/v4/locales/ota.js
 var error29 = () => {
   const Sizable = {
     string: { unit: "harf", verb: "olmalıdır" },
@@ -7668,7 +7668,7 @@ function ota_default() {
     localeError: error29()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ps.js
+// node_modules/zod/v4/locales/ps.js
 var error30 = () => {
   const Sizable = {
     string: { unit: "توکي", verb: "ولري" },
@@ -7790,7 +7790,7 @@ function ps_default() {
     localeError: error30()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/pl.js
+// node_modules/zod/v4/locales/pl.js
 var error31 = () => {
   const Sizable = {
     string: { unit: "znaków", verb: "mieć" },
@@ -7907,7 +7907,7 @@ function pl_default() {
     localeError: error31()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/pt.js
+// node_modules/zod/v4/locales/pt.js
 var error32 = () => {
   const Sizable = {
     string: { unit: "caracteres", verb: "ter" },
@@ -8023,7 +8023,7 @@ function pt_default() {
     localeError: error32()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ru.js
+// node_modules/zod/v4/locales/ru.js
 function getRussianPlural(count, one, few, many) {
   const absCount = Math.abs(count);
   const lastDigit = absCount % 10;
@@ -8187,7 +8187,7 @@ function ru_default() {
     localeError: error33()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/sl.js
+// node_modules/zod/v4/locales/sl.js
 var error34 = () => {
   const Sizable = {
     string: { unit: "znakov", verb: "imeti" },
@@ -8304,7 +8304,7 @@ function sl_default() {
     localeError: error34()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/sv.js
+// node_modules/zod/v4/locales/sv.js
 var error35 = () => {
   const Sizable = {
     string: { unit: "tecken", verb: "att ha" },
@@ -8422,7 +8422,7 @@ function sv_default() {
     localeError: error35()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ta.js
+// node_modules/zod/v4/locales/ta.js
 var error36 = () => {
   const Sizable = {
     string: { unit: "எழுத்துக்கள்", verb: "கொண்டிருக்க வேண்டும்" },
@@ -8539,7 +8539,7 @@ function ta_default() {
     localeError: error36()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/th.js
+// node_modules/zod/v4/locales/th.js
 var error37 = () => {
   const Sizable = {
     string: { unit: "ตัวอักษร", verb: "ควรมี" },
@@ -8656,7 +8656,7 @@ function th_default() {
     localeError: error37()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/tr.js
+// node_modules/zod/v4/locales/tr.js
 var parsedType6 = (data) => {
   const t = typeof data;
   switch (t) {
@@ -8771,7 +8771,7 @@ function tr_default() {
     localeError: error38()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/uk.js
+// node_modules/zod/v4/locales/uk.js
 var error39 = () => {
   const Sizable = {
     string: { unit: "символів", verb: "матиме" },
@@ -8888,11 +8888,11 @@ function uk_default() {
   };
 }
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ua.js
+// node_modules/zod/v4/locales/ua.js
 function ua_default() {
   return uk_default();
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ur.js
+// node_modules/zod/v4/locales/ur.js
 var error40 = () => {
   const Sizable = {
     string: { unit: "حروف", verb: "ہونا" },
@@ -9009,7 +9009,7 @@ function ur_default() {
     localeError: error40()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/vi.js
+// node_modules/zod/v4/locales/vi.js
 var error41 = () => {
   const Sizable = {
     string: { unit: "ký tự", verb: "có" },
@@ -9125,7 +9125,7 @@ function vi_default() {
     localeError: error41()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/zh-CN.js
+// node_modules/zod/v4/locales/zh-CN.js
 var error42 = () => {
   const Sizable = {
     string: { unit: "字符", verb: "包含" },
@@ -9241,7 +9241,7 @@ function zh_CN_default() {
     localeError: error42()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/zh-TW.js
+// node_modules/zod/v4/locales/zh-TW.js
 var error43 = () => {
   const Sizable = {
     string: { unit: "字元", verb: "擁有" },
@@ -9358,7 +9358,7 @@ function zh_TW_default() {
     localeError: error43()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/yo.js
+// node_modules/zod/v4/locales/yo.js
 var error44 = () => {
   const Sizable = {
     string: { unit: "àmi", verb: "ní" },
@@ -9473,7 +9473,7 @@ function yo_default() {
     localeError: error44()
   };
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/registries.js
+// node_modules/zod/v4/core/registries.js
 var $output = Symbol("ZodOutput");
 var $input = Symbol("ZodInput");
 
@@ -9524,7 +9524,7 @@ function registry() {
   return new $ZodRegistry;
 }
 var globalRegistry = /* @__PURE__ */ registry();
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/api.js
+// node_modules/zod/v4/core/api.js
 function _string(Class2, params) {
   return new Class2({
     type: "string",
@@ -10402,7 +10402,7 @@ function _stringFormat(Class2, format, fnOrRegex, _params = {}) {
   const inst = new Class2(def);
   return inst;
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/to-json-schema.js
+// node_modules/zod/v4/core/to-json-schema.js
 class JSONSchemaGenerator {
   constructor(params) {
     this.counter = 0;
@@ -11206,9 +11206,9 @@ function isTransforming(_schema, _ctx) {
   }
   throw new Error(`Unknown schema type: ${def.type}`);
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/json-schema.js
+// node_modules/zod/v4/core/json-schema.js
 var exports_json_schema = {};
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/iso.js
+// node_modules/zod/v4/classic/iso.js
 var exports_iso = {};
 __export(exports_iso, {
   time: () => time2,
@@ -11249,7 +11249,7 @@ function duration2(params) {
   return _isoDuration(ZodISODuration, params);
 }
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/errors.js
+// node_modules/zod/v4/classic/errors.js
 var initializer2 = (inst, issues) => {
   $ZodError.init(inst, issues);
   inst.name = "ZodError";
@@ -11284,7 +11284,7 @@ var ZodRealError = $constructor("ZodError", initializer2, {
   Parent: Error
 });
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/parse.js
+// node_modules/zod/v4/classic/parse.js
 var parse3 = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse2 = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -11298,7 +11298,7 @@ var safeDecode2 = /* @__PURE__ */ _safeDecode(ZodRealError);
 var safeEncodeAsync2 = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 var safeDecodeAsync2 = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/schemas.js
+// node_modules/zod/v4/classic/schemas.js
 var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
   $ZodType.init(inst, def);
   inst.def = def;
@@ -12273,7 +12273,7 @@ function json(params) {
 function preprocess(fn, schema) {
   return pipe(transform(fn), schema);
 }
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/compat.js
+// node_modules/zod/v4/classic/compat.js
 var ZodIssueCode = {
   invalid_type: "invalid_type",
   too_big: "too_big",
@@ -12297,7 +12297,7 @@ function getErrorMap() {
 }
 var ZodFirstPartyTypeKind;
 (function(ZodFirstPartyTypeKind2) {})(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/coerce.js
+// node_modules/zod/v4/classic/coerce.js
 var exports_coerce = {};
 __export(exports_coerce, {
   string: () => string3,
@@ -12322,7 +12322,7 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
-// node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/external.js
+// node_modules/zod/v4/classic/external.js
 config(en_default());
 // node_modules/@opencode-ai/plugin/dist/tool.js
 function tool(input) {
@@ -12334,9 +12334,9 @@ import net2 from "net";
 
 // src/agent-backend.ts
 import net from "net";
-import { readFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { mkdirSync, readFileSync } from "fs";
+import { homedir, tmpdir } from "os";
+import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { spawn } from "child_process";
 import { createRequire } from "module";
 var agentRequire = createRequire(import.meta.url);
@@ -12344,6 +12344,8 @@ var REQUEST_TIMEOUT_MS = 60000;
 var DEFAULT_PAGE_TEXT_LIMIT = 20000;
 var DEFAULT_LIST_LIMIT = 50;
 var DEFAULT_POLL_MS = 200;
+var BASE_DIR = join(homedir(), ".opencode-browser");
+var DEFAULT_DOWNLOADS_DIR = join(BASE_DIR, "downloads");
 function createJsonLineParser(onMessage) {
   let buffer = "";
   return (chunk) => {
@@ -12368,7 +12370,7 @@ function writeJsonLine(socket, msg) {
 `);
 }
 async function sleep(ms) {
-  return await new Promise((resolve) => setTimeout(resolve, ms));
+  return await new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 function parseEnvNumber(value) {
   if (!value)
@@ -12670,13 +12672,40 @@ function ensureEvalResult(result, fallback) {
 function createAgentBackend(sessionId) {
   const session = getAgentSession(sessionId);
   const connection = getAgentConnectionInfo(session);
+  const downloadsDir = (() => {
+    const raw = process.env.OPENCODE_BROWSER_AGENT_DOWNLOADS_DIR?.trim();
+    if (!raw)
+      return DEFAULT_DOWNLOADS_DIR;
+    return isAbsolute(raw) ? raw : resolve(process.cwd(), raw);
+  })();
+  mkdirSync(downloadsDir, { recursive: true });
+  const downloads = [];
+  function resolveDownloadPath(filename, urlValue) {
+    let name = typeof filename === "string" ? filename.trim() : "";
+    if (!name && typeof urlValue === "string") {
+      try {
+        const u = new URL(urlValue);
+        name = basename(u.pathname) || "";
+      } catch {}
+    }
+    if (!name)
+      name = `download-${Date.now()}`;
+    const fullPath = isAbsolute(name) ? name : join(downloadsDir, name);
+    mkdirSync(dirname(fullPath), { recursive: true });
+    return fullPath;
+  }
+  function recordDownload(entry) {
+    downloads.unshift({ ...entry, timestamp: new Date().toISOString() });
+    if (downloads.length > 50)
+      downloads.length = 50;
+  }
   let agentSocket = null;
   let agentReqId = 0;
   const agentPending = new Map;
   async function connectToAgent() {
-    return await new Promise((resolve, reject) => {
+    return await new Promise((resolve2, reject) => {
       const socket = connection.type === "unix" ? net.createConnection(connection.path) : net.createConnection({ host: connection.host, port: connection.port });
-      socket.once("connect", () => resolve(socket));
+      socket.once("connect", () => resolve2(socket));
       socket.once("error", (err) => reject(err));
     });
   }
@@ -12729,8 +12758,8 @@ function createAgentBackend(sessionId) {
   async function agentRequest(action, payload) {
     const socket = await ensureAgentSocket();
     const id = `a${++agentReqId}`;
-    return await new Promise((resolve, reject) => {
-      agentPending.set(id, { resolve, reject });
+    return await new Promise((resolve2, reject) => {
+      agentPending.set(id, { resolve: resolve2, reject });
       writeJsonLine(socket, { id, action, ...payload });
       setTimeout(() => {
         if (!agentPending.has(id))
@@ -12847,6 +12876,9 @@ function createAgentBackend(sessionId) {
         }));
         return { content: JSON.stringify(mapped, null, 2) };
       }
+      case "list_downloads": {
+        return { content: JSON.stringify({ downloads }, null, 2) };
+      }
       case "open_tab": {
         const active = args.active;
         let previousActive = null;
@@ -12878,6 +12910,48 @@ function createAgentBackend(sessionId) {
             throw new Error("URL is required");
           await agentCommand("navigate", { url: args.url });
           return { content: `Navigated to ${args.url}` };
+        });
+      }
+      case "download": {
+        return await withTab(args.tabId, async () => {
+          const url2 = typeof args.url === "string" ? args.url.trim() : "";
+          const selector = typeof args.selector === "string" ? args.selector.trim() : "";
+          const filename = typeof args.filename === "string" ? args.filename.trim() : "";
+          const waitValue = args.wait === undefined ? false : !!args.wait;
+          const timeoutValue = Number.isFinite(args.downloadTimeoutMs) ? args.downloadTimeoutMs : undefined;
+          if (!url2 && !selector)
+            throw new Error("url or selector is required");
+          if (url2 && selector)
+            throw new Error("Provide either url or selector, not both");
+          if (!waitValue) {
+            if (selector) {
+              await agentCommand("click", { selector });
+              return { content: JSON.stringify({ ok: true, started: true, selector }, null, 2) };
+            }
+            await agentCommand("navigate", { url: url2 });
+            return { content: JSON.stringify({ ok: true, started: true, url: url2 }, null, 2) };
+          }
+          if (selector) {
+            const path2 = resolveDownloadPath(filename || undefined);
+            const data2 = await agentCommand("download", { selector, path: path2 });
+            const entry2 = {
+              path: String(data2?.path || path2),
+              filename: typeof data2?.suggestedFilename === "string" ? data2.suggestedFilename : undefined,
+              url: url2 || undefined
+            };
+            recordDownload({ path: entry2.path, filename: entry2.filename, url: entry2.url });
+            return { content: JSON.stringify({ ok: true, ...entry2 }, null, 2) };
+          }
+          const path = resolveDownloadPath(filename || undefined, url2);
+          await agentCommand("navigate", { url: url2 });
+          const data = await agentCommand("waitfordownload", { path, timeout: timeoutValue });
+          const entry = {
+            path: String(data?.path || path),
+            filename: typeof data?.filename === "string" ? data.filename : undefined,
+            url: typeof data?.url === "string" ? data.url : url2
+          };
+          recordDownload({ path: entry.path, filename: entry.filename, url: entry.url });
+          return { content: JSON.stringify({ ok: true, ...entry }, null, 2) };
         });
       }
       case "click": {
@@ -12939,6 +13013,22 @@ function createAgentBackend(sessionId) {
           const labelText = selectedLabel ? String(selectedLabel) : "";
           const summary = labelText && valueText && labelText !== valueText ? `${labelText} (${valueText})` : labelText || valueText || "option";
           return { content: `Selected ${summary} in ${args.selector}` };
+        });
+      }
+      case "set_file_input": {
+        return await withTab(args.tabId, async () => {
+          if (!args.selector)
+            throw new Error("Selector is required");
+          if (!args.filePath)
+            throw new Error("filePath is required");
+          const rawPath = String(args.filePath).trim();
+          if (!rawPath)
+            throw new Error("filePath is required");
+          const absPath = isAbsolute(rawPath) ? rawPath : resolve(process.cwd(), rawPath);
+          const data = await agentCommand("upload", { selector: args.selector, files: absPath });
+          return {
+            content: JSON.stringify({ ok: true, selector: args.selector, uploaded: data?.uploaded ?? [absPath] }, null, 2)
+          };
         });
       }
       case "screenshot": {
@@ -13018,13 +13108,13 @@ function createAgentBackend(sessionId) {
 }
 
 // src/plugin.ts
-import { existsSync, mkdirSync, readFileSync as readFileSync2 } from "fs";
-import { homedir } from "os";
-import { dirname, join as join2 } from "path";
+import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync2, statSync } from "fs";
+import { homedir as homedir2 } from "os";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join2, resolve as resolve2 } from "path";
 import { spawn as spawn2 } from "child_process";
 import { fileURLToPath } from "url";
 var __filename2 = fileURLToPath(import.meta.url);
-var __dirname2 = dirname(__filename2);
+var __dirname2 = dirname2(__filename2);
 var PACKAGE_JSON_PATH = join2(__dirname2, "..", "package.json");
 var cachedVersion = null;
 function getPackageVersion() {
@@ -13041,9 +13131,36 @@ function getPackageVersion() {
   return cachedVersion;
 }
 var { schema } = tool;
-var BASE_DIR = join2(homedir(), ".opencode-browser");
-var SOCKET_PATH = join2(BASE_DIR, "broker.sock");
-mkdirSync(BASE_DIR, { recursive: true });
+var BASE_DIR2 = join2(homedir2(), ".opencode-browser");
+var SOCKET_PATH = join2(BASE_DIR2, "broker.sock");
+mkdirSync2(BASE_DIR2, { recursive: true });
+var DEFAULT_MAX_UPLOAD_BYTES = 512 * 1024;
+var MAX_UPLOAD_BYTES = (() => {
+  const raw = process.env.OPENCODE_BROWSER_MAX_UPLOAD_BYTES;
+  const value = raw ? Number(raw) : NaN;
+  if (Number.isFinite(value) && value > 0)
+    return value;
+  return DEFAULT_MAX_UPLOAD_BYTES;
+})();
+function resolveUploadPath(filePath) {
+  const trimmed = typeof filePath === "string" ? filePath.trim() : "";
+  if (!trimmed)
+    throw new Error("filePath is required");
+  return isAbsolute2(trimmed) ? trimmed : resolve2(process.cwd(), trimmed);
+}
+function buildFileUploadPayload(filePath, fileName, mimeType) {
+  const absPath = resolveUploadPath(filePath);
+  const stats = statSync(absPath);
+  if (!stats.isFile())
+    throw new Error(`Not a file: ${absPath}`);
+  if (stats.size > MAX_UPLOAD_BYTES) {
+    throw new Error(`File too large (${stats.size} bytes). Max is ${MAX_UPLOAD_BYTES} bytes (OPENCODE_BROWSER_MAX_UPLOAD_BYTES). ` + `For larger uploads, use OPENCODE_BROWSER_BACKEND=agent.`);
+  }
+  const base643 = readFileSync2(absPath).toString("base64");
+  const name = typeof fileName === "string" && fileName.trim() ? fileName.trim() : basename2(absPath);
+  const mt = typeof mimeType === "string" && mimeType.trim() ? mimeType.trim() : undefined;
+  return { name, mimeType: mt, base64: base643 };
+}
 function createJsonLineParser2(onMessage) {
   let buffer = "";
   return (chunk) => {
@@ -13068,7 +13185,7 @@ function writeJsonLine2(socket, msg) {
 `);
 }
 function maybeStartBroker() {
-  const brokerPath = join2(BASE_DIR, "broker.cjs");
+  const brokerPath = join2(BASE_DIR2, "broker.cjs");
   if (!existsSync(brokerPath))
     return;
   try {
@@ -13077,9 +13194,9 @@ function maybeStartBroker() {
   } catch {}
 }
 async function connectToBroker() {
-  return await new Promise((resolve, reject) => {
+  return await new Promise((resolve3, reject) => {
     const socket = net2.createConnection(SOCKET_PATH);
-    socket.once("connect", () => resolve(socket));
+    socket.once("connect", () => resolve3(socket));
     socket.once("error", (err) => reject(err));
   });
 }
@@ -13137,8 +13254,8 @@ async function ensureBrokerSocket() {
 async function brokerRequest(op, payload) {
   const s = await ensureBrokerSocket();
   const id = ++reqId;
-  return await new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+  return await new Promise((resolve3, reject) => {
+    pending.set(id, { resolve: resolve3, reject });
     writeJsonLine2(s, { type: "request", id, op, ...payload });
     setTimeout(() => {
       if (!pending.has(id))
@@ -13428,6 +13545,78 @@ var plugin = async (ctx) => {
             tabId
           });
           return toolResultText(data, "Query failed");
+        }
+      }),
+      browser_download: tool({
+        description: "Download a file via URL or by clicking an element on the page.",
+        args: {
+          url: schema.string().optional(),
+          selector: schema.string().optional(),
+          filename: schema.string().optional(),
+          conflictAction: schema.string().optional(),
+          saveAs: schema.boolean().optional(),
+          wait: schema.boolean().optional(),
+          downloadTimeoutMs: schema.number().optional(),
+          index: schema.number().optional(),
+          tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional()
+        },
+        async execute({ url: url2, selector, filename, conflictAction, saveAs, wait, downloadTimeoutMs, index, tabId, timeoutMs, pollMs }, ctx2) {
+          const data = await toolRequest("download", {
+            url: url2,
+            selector,
+            filename,
+            conflictAction,
+            saveAs,
+            wait,
+            downloadTimeoutMs,
+            index,
+            tabId,
+            timeoutMs,
+            pollMs
+          });
+          return toolResultText(data, "Download started");
+        }
+      }),
+      browser_list_downloads: tool({
+        description: "List recent downloads (Chrome backend) or session downloads (agent backend).",
+        args: {
+          limit: schema.number().optional(),
+          state: schema.string().optional()
+        },
+        async execute({ limit, state }, ctx2) {
+          const data = await toolRequest("list_downloads", { limit, state });
+          return toolResultText(data, "[]");
+        }
+      }),
+      browser_set_file_input: tool({
+        description: "Set a file input element's selected file using a local file path.",
+        args: {
+          selector: schema.string(),
+          filePath: schema.string(),
+          fileName: schema.string().optional(),
+          mimeType: schema.string().optional(),
+          index: schema.number().optional(),
+          tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional()
+        },
+        async execute({ selector, filePath, fileName, mimeType, index, tabId, timeoutMs, pollMs }, ctx2) {
+          if (USE_AGENT_BACKEND) {
+            const data2 = await toolRequest("set_file_input", { selector, filePath, tabId, index, timeoutMs, pollMs });
+            return toolResultText(data2, "Set file input");
+          }
+          const file2 = buildFileUploadPayload(filePath, fileName, mimeType);
+          const data = await toolRequest("set_file_input", {
+            selector,
+            tabId,
+            index,
+            timeoutMs,
+            pollMs,
+            files: [file2]
+          });
+          return toolResultText(data, "Set file input");
         }
       })
     }

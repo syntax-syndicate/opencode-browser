@@ -111,6 +111,9 @@ async function executeTool(toolName, args) {
     query: toolQuery,
     scroll: toolScroll,
     wait: toolWait,
+    download: toolDownload,
+    list_downloads: toolListDownloads,
+    set_file_input: toolSetFileInput,
   }
 
   const fn = tools[toolName]
@@ -609,6 +612,67 @@ async function pageOps(command, args) {
     }
   }
 
+  if (command === "set_file_input") {
+    const rawFiles = Array.isArray(options.files) ? options.files : options.files ? [options.files] : []
+    if (!rawFiles.length) return { ok: false, error: "files is required" }
+
+    const match = await resolveMatches(selectors, index, timeoutMs, pollMs)
+    if (!match.chosen) {
+      return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
+    }
+
+    const tag = match.chosen.tagName
+    if (tag !== "INPUT" || match.chosen.type !== "file") {
+      return { ok: false, error: `Element is not a file input: ${match.selectorUsed} (${tag.toLowerCase()})` }
+    }
+
+    function decodeBase64(value) {
+      const raw = safeString(value)
+      const b64 = raw.includes(",") ? raw.split(",").pop() : raw
+      const binary = atob(b64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      return bytes
+    }
+
+    const dt = new DataTransfer()
+    const names = []
+
+    for (const fileInfo of rawFiles) {
+      const name = safeString(fileInfo?.name) || "upload.bin"
+      const mimeType = safeString(fileInfo?.mimeType) || "application/octet-stream"
+      const base64 = safeString(fileInfo?.base64)
+      if (!base64) return { ok: false, error: "file.base64 is required" }
+      const bytes = decodeBase64(base64)
+      const file = new File([bytes], name, { type: mimeType, lastModified: Date.now() })
+      dt.items.add(file)
+      names.push(name)
+    }
+
+    try {
+      match.chosen.scrollIntoView({ block: "center", inline: "center" })
+    } catch {}
+
+    try {
+      match.chosen.focus()
+    } catch {}
+
+    try {
+      match.chosen.files = dt.files
+    } catch {
+      try {
+        Object.defineProperty(match.chosen, "files", { value: dt.files, writable: false })
+      } catch {
+        return { ok: false, error: "Failed to set file input" }
+      }
+    }
+
+    match.chosen.dispatchEvent(new Event("input", { bubbles: true }))
+    match.chosen.dispatchEvent(new Event("change", { bubbles: true }))
+
+    return { ok: true, selectorUsed: match.selectorUsed, count: dt.files.length, names }
+  }
+
   if (command === "scroll") {
     const scrollX = Number.isFinite(options.x) ? options.x : 0
     const scrollY = Number.isFinite(options.y) ? options.y : 0
@@ -984,6 +1048,138 @@ async function toolScroll({ x = 0, y = 0, selector, tabId, timeoutMs, pollMs }) 
 async function toolWait({ ms = 1000, tabId }) {
   await new Promise((resolve) => setTimeout(resolve, ms))
   return { tabId, content: `Waited ${ms}ms` }
+}
+
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(Math.max(n, min), max)
+}
+
+function normalizeDownloadTimeoutMs(value) {
+  return clampNumber(value, 0, 60000, 60000)
+}
+
+function waitForNextDownloadCreated(timeoutMs) {
+  const timeout = normalizeDownloadTimeoutMs(timeoutMs)
+  return new Promise((resolve, reject) => {
+    const listener = (item) => {
+      cleanup()
+      resolve(item)
+    }
+
+    const timer = timeout
+      ? setTimeout(() => {
+          cleanup()
+          reject(new Error("Timed out waiting for download to start"))
+        }, timeout)
+      : null
+
+    function cleanup() {
+      chrome.downloads.onCreated.removeListener(listener)
+      if (timer) clearTimeout(timer)
+    }
+
+    chrome.downloads.onCreated.addListener(listener)
+  })
+}
+
+async function getDownloadById(downloadId) {
+  const items = await chrome.downloads.search({ id: downloadId })
+  return items && items.length ? items[0] : null
+}
+
+async function waitForDownloadCompletion(downloadId, timeoutMs) {
+  const timeout = normalizeDownloadTimeoutMs(timeoutMs)
+  const pollMs = 200
+  const endAt = Date.now() + timeout
+
+  while (true) {
+    const item = await getDownloadById(downloadId)
+    if (item && (item.state === "complete" || item.state === "interrupted")) return item
+    if (!timeout || Date.now() >= endAt) return item
+    await new Promise((resolve) => setTimeout(resolve, pollMs))
+  }
+}
+
+async function toolDownload({
+  url,
+  selector,
+  filename,
+  conflictAction,
+  saveAs = false,
+  wait = false,
+  downloadTimeoutMs,
+  tabId,
+  index = 0,
+  timeoutMs,
+  pollMs,
+}) {
+  const hasUrl = typeof url === "string" && url.trim()
+  const hasSelector = typeof selector === "string" && selector.trim()
+
+  if (!hasUrl && !hasSelector) throw new Error("url or selector is required")
+  if (hasUrl && hasSelector) throw new Error("Provide either url or selector, not both")
+
+  let downloadId = null
+
+  if (hasUrl) {
+    const options = { url: url.trim() }
+    if (typeof filename === "string" && filename.trim()) options.filename = filename.trim()
+    if (typeof conflictAction === "string" && conflictAction.trim()) options.conflictAction = conflictAction.trim()
+    if (typeof saveAs === "boolean") options.saveAs = saveAs
+
+    downloadId = await chrome.downloads.download(options)
+  } else {
+    const tab = await getTabById(tabId)
+    const created = waitForNextDownloadCreated(downloadTimeoutMs)
+    const clicked = await runInPage(tab.id, "click", { selector, index, timeoutMs, pollMs })
+    if (!clicked?.ok) throw new Error(clicked?.error || "Click failed")
+    const createdItem = await created
+    downloadId = createdItem?.id
+  }
+
+  if (!Number.isFinite(downloadId)) throw new Error("Download did not start")
+
+  if (!wait) {
+    const item = await getDownloadById(downloadId)
+    return { content: { downloadId, item } }
+  }
+
+  const item = await waitForDownloadCompletion(downloadId, downloadTimeoutMs)
+  return { content: { downloadId, item } }
+}
+
+async function toolListDownloads({ limit = 20, state } = {}) {
+  const limitValue = clampNumber(limit, 1, 200, 20)
+  const query = { orderBy: ["-startTime"], limit: limitValue }
+  if (typeof state === "string" && state.trim()) query.state = state.trim()
+
+  const downloads = await chrome.downloads.search(query)
+  const out = downloads.map((d) => ({
+    id: d.id,
+    url: d.url,
+    filename: d.filename,
+    state: d.state,
+    bytesReceived: d.bytesReceived,
+    totalBytes: d.totalBytes,
+    startTime: d.startTime,
+    endTime: d.endTime,
+    error: d.error,
+    mime: d.mime,
+  }))
+
+  return { content: JSON.stringify({ downloads: out }, null, 2) }
+}
+
+async function toolSetFileInput({ selector, tabId, index = 0, timeoutMs, pollMs, files }) {
+  if (!selector) throw new Error("Selector is required")
+  const tab = await getTabById(tabId)
+
+  const result = await runInPage(tab.id, "set_file_input", { selector, index, timeoutMs, pollMs, files })
+  if (!result?.ok) throw new Error(result?.error || "Failed to set file input")
+  const used = result.selectorUsed || selector
+  return { tabId: tab.id, content: JSON.stringify({ selector: used, ...result }, null, 2) }
 }
 
 chrome.runtime.onInstalled.addListener(() => connect())

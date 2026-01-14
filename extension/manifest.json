@@ -13,7 +13,8 @@
     "storage",
     "notifications",
     "alarms",
-    "nativeMessaging"
+    "nativeMessaging",
+    "downloads"
   ],
   "host_permissions": [
     "<all_urls>"

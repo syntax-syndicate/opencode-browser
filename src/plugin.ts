@@ -2,9 +2,9 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import net from "net";
 import { createAgentBackend, type AgentBackend } from "./agent-backend.js";
-import { existsSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
-import { dirname, join } from "path";
+import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 
@@ -36,6 +36,40 @@ const BASE_DIR = join(homedir(), ".opencode-browser");
 const SOCKET_PATH = join(BASE_DIR, "broker.sock");
 
 mkdirSync(BASE_DIR, { recursive: true });
+
+const DEFAULT_MAX_UPLOAD_BYTES = 512 * 1024;
+const MAX_UPLOAD_BYTES = (() => {
+  const raw = process.env.OPENCODE_BROWSER_MAX_UPLOAD_BYTES;
+  const value = raw ? Number(raw) : NaN;
+  if (Number.isFinite(value) && value > 0) return value;
+  return DEFAULT_MAX_UPLOAD_BYTES;
+})();
+
+function resolveUploadPath(filePath: string): string {
+  const trimmed = typeof filePath === "string" ? filePath.trim() : "";
+  if (!trimmed) throw new Error("filePath is required");
+  return isAbsolute(trimmed) ? trimmed : resolve(process.cwd(), trimmed);
+}
+
+function buildFileUploadPayload(
+  filePath: string,
+  fileName?: string,
+  mimeType?: string
+): { name: string; mimeType?: string; base64: string } {
+  const absPath = resolveUploadPath(filePath);
+  const stats = statSync(absPath);
+  if (!stats.isFile()) throw new Error(`Not a file: ${absPath}`);
+  if (stats.size > MAX_UPLOAD_BYTES) {
+    throw new Error(
+      `File too large (${stats.size} bytes). Max is ${MAX_UPLOAD_BYTES} bytes (OPENCODE_BROWSER_MAX_UPLOAD_BYTES). ` +
+        `For larger uploads, use OPENCODE_BROWSER_BACKEND=agent.`
+    );
+  }
+  const base64 = readFileSync(absPath).toString("base64");
+  const name = typeof fileName === "string" && fileName.trim() ? fileName.trim() : basename(absPath);
+  const mt = typeof mimeType === "string" && mimeType.trim() ? mimeType.trim() : undefined;
+  return { name, mimeType: mt, base64 };
+}
 
 type BrokerResponse =
   | { type: "response"; id: number; ok: true; data: any }
@@ -465,6 +499,85 @@ const plugin: Plugin = async (ctx) => {
             tabId,
           });
           return toolResultText(data, "Query failed");
+        },
+      }),
+
+      browser_download: tool({
+        description: "Download a file via URL or by clicking an element on the page.",
+        args: {
+          url: schema.string().optional(),
+          selector: schema.string().optional(),
+          filename: schema.string().optional(),
+          conflictAction: schema.string().optional(),
+          saveAs: schema.boolean().optional(),
+          wait: schema.boolean().optional(),
+          downloadTimeoutMs: schema.number().optional(),
+          index: schema.number().optional(),
+          tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional(),
+        },
+        async execute(
+          { url, selector, filename, conflictAction, saveAs, wait, downloadTimeoutMs, index, tabId, timeoutMs, pollMs },
+          ctx
+        ) {
+          const data = await toolRequest("download", {
+            url,
+            selector,
+            filename,
+            conflictAction,
+            saveAs,
+            wait,
+            downloadTimeoutMs,
+            index,
+            tabId,
+            timeoutMs,
+            pollMs,
+          });
+          return toolResultText(data, "Download started");
+        },
+      }),
+
+      browser_list_downloads: tool({
+        description: "List recent downloads (Chrome backend) or session downloads (agent backend).",
+        args: {
+          limit: schema.number().optional(),
+          state: schema.string().optional(),
+        },
+        async execute({ limit, state }, ctx) {
+          const data = await toolRequest("list_downloads", { limit, state });
+          return toolResultText(data, "[]");
+        },
+      }),
+
+      browser_set_file_input: tool({
+        description: "Set a file input element's selected file using a local file path.",
+        args: {
+          selector: schema.string(),
+          filePath: schema.string(),
+          fileName: schema.string().optional(),
+          mimeType: schema.string().optional(),
+          index: schema.number().optional(),
+          tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional(),
+        },
+        async execute({ selector, filePath, fileName, mimeType, index, tabId, timeoutMs, pollMs }, ctx) {
+          if (USE_AGENT_BACKEND) {
+            const data = await toolRequest("set_file_input", { selector, filePath, tabId, index, timeoutMs, pollMs });
+            return toolResultText(data, "Set file input");
+          }
+
+          const file = buildFileUploadPayload(filePath, fileName, mimeType);
+          const data = await toolRequest("set_file_input", {
+            selector,
+            tabId,
+            index,
+            timeoutMs,
+            pollMs,
+            files: [file],
+          });
+          return toolResultText(data, "Set file input");
         },
       }),
     },

@@ -135,6 +135,13 @@ Core primitives:
 - `browser_scroll` (optional `timeoutMs`/`pollMs`)
 - `browser_wait`
 
+Downloads:
+- `browser_download`
+- `browser_list_downloads`
+
+Uploads:
+- `browser_set_file_input` (extension backend supports small files; use agent backend for larger uploads)
+
 Selector helpers (usable in `selector`):
 - `label:Mailing Address: City`
 - `aria:Principal Address: City`
@@ -153,8 +160,8 @@ Diagnostics:
 - [ ] Add tab management tools (`browser_set_active_tab`)
 - [ ] Add navigation helpers (`browser_back`, `browser_forward`, `browser_reload`)
 - [ ] Add keyboard input tool (`browser_key`)
-- [ ] Add download support (`browser_download`, `browser_list_downloads`)
-- [ ] Add upload support (`browser_set_file_input`)
+- [x] Add download support (`browser_download`, `browser_list_downloads`)
+- [x] Add upload support (`browser_set_file_input`)
 
 ## Troubleshooting
 
