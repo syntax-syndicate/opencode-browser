@@ -13192,7 +13192,14 @@ var plugin = async (ctx) => {
         description: "Debug plugin loading and connection status.",
         args: {},
         async execute(args, ctx2) {
-          console.log("[opencode-browser] browser_debug called", { sessionId, pid: process.pid });
+          if (ctx2?.client?.app?.log) {
+            await ctx2.client.app.log({
+              service: "opencode-browser",
+              level: "info",
+              message: "browser_debug called",
+              extra: { sessionId, pid: process.pid }
+            });
+          }
           return JSON.stringify({
             loaded: true,
             sessionId,
