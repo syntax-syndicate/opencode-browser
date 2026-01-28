@@ -5,6 +5,73 @@ let port = null
 let isConnected = false
 let connectionAttempts = 0
 
+// Debugger state management for console/error capture
+const debuggerState = new Map()
+const MAX_LOG_ENTRIES = 1000
+
+async function ensureDebuggerAttached(tabId) {
+  if (debuggerState.has(tabId)) return debuggerState.get(tabId)
+
+  const state = { attached: false, consoleMessages: [], pageErrors: [] }
+  debuggerState.set(tabId, state)
+
+  try {
+    await chrome.debugger.attach({ tabId }, "1.3")
+    await chrome.debugger.sendCommand({ tabId }, "Runtime.enable")
+    state.attached = true
+  } catch (e) {
+    console.warn("[OpenCode] Failed to attach debugger:", e.message || e)
+  }
+
+  return state
+}
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  const state = debuggerState.get(source.tabId)
+  if (!state) return
+
+  if (method === "Runtime.consoleAPICalled") {
+    if (state.consoleMessages.length >= MAX_LOG_ENTRIES) {
+      state.consoleMessages.shift()
+    }
+    state.consoleMessages.push({
+      type: params.type,
+      text: params.args.map((a) => a.value ?? a.description ?? "").join(" "),
+      timestamp: Date.now(),
+      source: params.stackTrace?.callFrames?.[0]?.url,
+      line: params.stackTrace?.callFrames?.[0]?.lineNumber,
+    })
+  }
+
+  if (method === "Runtime.exceptionThrown") {
+    if (state.pageErrors.length >= MAX_LOG_ENTRIES) {
+      state.pageErrors.shift()
+    }
+    state.pageErrors.push({
+      message: params.exceptionDetails.text,
+      source: params.exceptionDetails.url,
+      line: params.exceptionDetails.lineNumber,
+      column: params.exceptionDetails.columnNumber,
+      stack: params.exceptionDetails.exception?.description,
+      timestamp: Date.now(),
+    })
+  }
+})
+
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (debuggerState.has(source.tabId)) {
+    const state = debuggerState.get(source.tabId)
+    state.attached = false
+  }
+})
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (debuggerState.has(tabId)) {
+    chrome.debugger.detach({ tabId }).catch(() => {})
+    debuggerState.delete(tabId)
+  }
+})
+
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.25 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -114,6 +181,9 @@ async function executeTool(toolName, args) {
     download: toolDownload,
     list_downloads: toolListDownloads,
     set_file_input: toolSetFileInput,
+    highlight: toolHighlight,
+    console: toolConsole,
+    errors: toolErrors,
   }
 
   const fn = tools[toolName]
@@ -690,6 +760,73 @@ async function pageOps(command, args) {
     return { ok: true }
   }
 
+  if (command === "highlight") {
+    const duration = Number.isFinite(options.duration) ? options.duration : 3000
+    const color = typeof options.color === "string" ? options.color : "#ff0000"
+    const showInfo = !!options.showInfo
+
+    const match = await resolveMatches(selectors, index, timeoutMs, pollMs)
+    if (!match.chosen) {
+      return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
+    }
+
+    const el = match.chosen
+    const rect = el.getBoundingClientRect()
+
+    // Remove any existing highlight overlay
+    const existing = document.getElementById("__opc_highlight_overlay")
+    if (existing) existing.remove()
+
+    // Create overlay
+    const overlay = document.createElement("div")
+    overlay.id = "__opc_highlight_overlay"
+    overlay.style.cssText = `
+      position: fixed;
+      top: ${rect.top}px;
+      left: ${rect.left}px;
+      width: ${rect.width}px;
+      height: ${rect.height}px;
+      border: 3px solid ${color};
+      box-shadow: 0 0 10px ${color};
+      pointer-events: none;
+      z-index: 2147483647;
+      transition: opacity 0.3s;
+    `
+
+    if (showInfo) {
+      const info = document.createElement("div")
+      info.style.cssText = `
+        position: absolute;
+        top: -25px;
+        left: 0;
+        background: ${color};
+        color: white;
+        padding: 2px 8px;
+        font-size: 12px;
+        font-family: monospace;
+        border-radius: 3px;
+        white-space: nowrap;
+      `
+      info.textContent = `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}`
+      overlay.appendChild(info)
+    }
+
+    document.body.appendChild(overlay)
+
+    setTimeout(() => {
+      overlay.style.opacity = "0"
+      setTimeout(() => overlay.remove(), 300)
+    }, duration)
+
+    return {
+      ok: true,
+      selectorUsed: match.selectorUsed,
+      highlighted: true,
+      tag: el.tagName,
+      id: el.id || null,
+    }
+  }
+
   if (command === "query") {
     if (mode === "page_text") {
       if (selectors.length && timeoutMs > 0) {
@@ -1180,6 +1317,88 @@ async function toolSetFileInput({ selector, tabId, index = 0, timeoutMs, pollMs,
   if (!result?.ok) throw new Error(result?.error || "Failed to set file input")
   const used = result.selectorUsed || selector
   return { tabId: tab.id, content: JSON.stringify({ selector: used, ...result }, null, 2) }
+}
+
+async function toolHighlight({ selector, tabId, index = 0, duration, color, showInfo, timeoutMs, pollMs }) {
+  if (!selector) throw new Error("Selector is required")
+  const tab = await getTabById(tabId)
+
+  const result = await runInPage(tab.id, "highlight", {
+    selector,
+    index,
+    duration,
+    color,
+    showInfo,
+    timeoutMs,
+    pollMs,
+  })
+  if (!result?.ok) throw new Error(result?.error || "Highlight failed")
+  return {
+    tabId: tab.id,
+    content: JSON.stringify({
+      highlighted: true,
+      tag: result.tag,
+      id: result.id,
+      selectorUsed: result.selectorUsed,
+    }),
+  }
+}
+
+async function toolConsole({ tabId, clear = false, filter } = {}) {
+  const tab = await getTabById(tabId)
+  const state = await ensureDebuggerAttached(tab.id)
+
+  if (!state.attached) {
+    return {
+      tabId: tab.id,
+      content: JSON.stringify({
+        error: "Debugger not attached. DevTools may be open or another debugger is active.",
+        messages: [],
+      }),
+    }
+  }
+
+  let messages = [...state.consoleMessages]
+
+  if (filter && typeof filter === "string") {
+    const filterType = filter.toLowerCase()
+    messages = messages.filter((m) => m.type === filterType)
+  }
+
+  if (clear) {
+    state.consoleMessages = []
+  }
+
+  return {
+    tabId: tab.id,
+    content: JSON.stringify(messages, null, 2),
+  }
+}
+
+async function toolErrors({ tabId, clear = false } = {}) {
+  const tab = await getTabById(tabId)
+  const state = await ensureDebuggerAttached(tab.id)
+
+  if (!state.attached) {
+    return {
+      tabId: tab.id,
+      content: JSON.stringify({
+        error: "Debugger not attached. DevTools may be open or another debugger is active.",
+        errors: [],
+      }),
+    }
+  }
+
+  const errors = [...state.pageErrors]
+
+  if (clear) {
+    state.pageErrors = []
+  }
+
+  return {
+    tabId: tab.id,
+    content: JSON.stringify(errors, null, 2),
+  }
 }
 
 chrome.runtime.onInstalled.addListener(() => connect())
