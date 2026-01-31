@@ -14,7 +14,8 @@
     "notifications",
     "alarms",
     "nativeMessaging",
-    "downloads"
+    "downloads",
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>"

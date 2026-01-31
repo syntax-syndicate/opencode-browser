@@ -580,6 +580,62 @@ const plugin: Plugin = async (ctx) => {
           return toolResultText(data, "Set file input");
         },
       }),
+
+      browser_highlight: tool({
+        description: "Highlight an element on the page with a colored border for visual debugging.",
+        args: {
+          selector: schema.string(),
+          index: schema.number().optional(),
+          duration: schema.number().optional(),
+          color: schema.string().optional(),
+          showInfo: schema.boolean().optional(),
+          tabId: schema.number().optional(),
+          timeoutMs: schema.number().optional(),
+          pollMs: schema.number().optional(),
+        },
+        async execute({ selector, index, duration, color, showInfo, tabId, timeoutMs, pollMs }, ctx) {
+          const data = await toolRequest("highlight", {
+            selector,
+            index,
+            duration,
+            color,
+            showInfo,
+            tabId,
+            timeoutMs,
+            pollMs,
+          });
+          return toolResultText(data, "Highlight failed");
+        },
+      }),
+
+      browser_console: tool({
+        description:
+          "Read console log messages from the page. Uses chrome.debugger API for complete capture. " +
+          "The debugger attaches lazily on first call and may show a banner in the browser.",
+        args: {
+          tabId: schema.number().optional(),
+          clear: schema.boolean().optional(),
+          filter: schema.string().optional(),
+        },
+        async execute({ tabId, clear, filter }, ctx) {
+          const data = await toolRequest("console", { tabId, clear, filter });
+          return toolResultText(data, "[]");
+        },
+      }),
+
+      browser_errors: tool({
+        description:
+          "Read JavaScript errors from the page. Uses chrome.debugger API for complete capture. " +
+          "The debugger attaches lazily on first call and may show a banner in the browser.",
+        args: {
+          tabId: schema.number().optional(),
+          clear: schema.boolean().optional(),
+        },
+        async execute({ tabId, clear }, ctx) {
+          const data = await toolRequest("errors", { tabId, clear });
+          return toolResultText(data, "[]");
+        },
+      }),
     },
   };
 };
