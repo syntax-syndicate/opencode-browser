@@ -58,6 +58,25 @@ Your `opencode.json` or `opencode.jsonc` should contain:
 bunx @different-ai/opencode-browser@latest update
 ```
 
+## Chrome Web Store maintainer flow
+
+Build a store-ready extension package:
+
+```bash
+bun run build:cws
+```
+
+Outputs:
+
+- `artifacts/chrome-web-store/opencode-browser-cws-v<version>.zip`
+- `artifacts/chrome-web-store/manifest.chrome-web-store.json`
+
+Submission checklist and guidance:
+
+- `CHROME_WEB_STORE.md`
+- `CHROME_WEB_STORE_REQUEST_TEMPLATE.md`
+- `PRIVACY.md`
+
 ## How it works
 
 ```
@@ -181,3 +200,7 @@ npx @different-ai/opencode-browser uninstall
 ```
 
 Then remove the unpacked extension in `chrome://extensions` and remove the plugin from `opencode.json` or `opencode.jsonc`.
+
+## Privacy
+
+- Privacy policy: `PRIVACY.md`

@@ -4,3 +4,4 @@ node_modules/
 .opencode/
 !.opencode/skill/
 !.opencode/skill/**
+artifacts/

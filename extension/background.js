@@ -1,15 +1,125 @@
 const NATIVE_HOST_NAME = "com.opencode.browser_automation"
 const KEEPALIVE_ALARM = "keepalive"
+const PERMISSION_HINT = "Click the OpenCode Browser extension icon and approve requested permissions."
+const OPTIONAL_RUNTIME_PERMISSIONS = ["nativeMessaging", "downloads", "debugger"]
+const OPTIONAL_RUNTIME_ORIGINS = ["<all_urls>"]
+
+const runtimeManifest = chrome.runtime.getManifest()
+const declaredOptionalPermissions = new Set(runtimeManifest.optional_permissions || [])
+const declaredOptionalOrigins = new Set(runtimeManifest.optional_host_permissions || [])
 
 let port = null
 let isConnected = false
 let connectionAttempts = 0
+let nativePermissionHintLogged = false
 
 // Debugger state management for console/error capture
 const debuggerState = new Map()
 const MAX_LOG_ENTRIES = 1000
 
+async function hasPermissions(query) {
+  if (!chrome.permissions?.contains) return true
+  try {
+    return await chrome.permissions.contains(query)
+  } catch {
+    return false
+  }
+}
+
+async function hasNativeMessagingPermission() {
+  return await hasPermissions({ permissions: ["nativeMessaging"] })
+}
+
+async function hasDebuggerPermission() {
+  return await hasPermissions({ permissions: ["debugger"] })
+}
+
+async function hasDownloadsPermission() {
+  return await hasPermissions({ permissions: ["downloads"] })
+}
+
+async function hasHostAccessPermission() {
+  return await hasPermissions({ origins: ["<all_urls>"] })
+}
+
+async function requestOptionalPermissionsFromClick() {
+  if (!chrome.permissions?.contains || !chrome.permissions?.request) {
+    return { granted: true, requested: false, permissions: [], origins: [] }
+  }
+
+  const permissions = []
+  for (const permission of OPTIONAL_RUNTIME_PERMISSIONS) {
+    if (!declaredOptionalPermissions.has(permission)) continue
+    const granted = await hasPermissions({ permissions: [permission] })
+    if (!granted) permissions.push(permission)
+  }
+
+  const origins = []
+  for (const origin of OPTIONAL_RUNTIME_ORIGINS) {
+    if (!declaredOptionalOrigins.has(origin)) continue
+    const granted = await hasPermissions({ origins: [origin] })
+    if (!granted) origins.push(origin)
+  }
+
+  if (!permissions.length && !origins.length) {
+    return { granted: true, requested: false, permissions, origins }
+  }
+
+  try {
+    const granted = await chrome.permissions.request({ permissions, origins })
+    return { granted, requested: true, permissions, origins }
+  } catch (error) {
+    return {
+      granted: false,
+      requested: true,
+      permissions,
+      origins,
+      error: error?.message || String(error),
+    }
+  }
+}
+
+async function ensureDebuggerAvailable() {
+  if (!chrome.debugger?.attach) {
+    return {
+      ok: false,
+      reason: "Debugger API unavailable in this build.",
+    }
+  }
+
+  const granted = await hasDebuggerPermission()
+  if (!granted) {
+    return {
+      ok: false,
+      reason: `Debugger permission not granted. ${PERMISSION_HINT}`,
+    }
+  }
+
+  return { ok: true }
+}
+
+async function ensureDownloadsAvailable() {
+  if (!chrome.downloads) {
+    throw new Error(`Downloads API unavailable in this build. ${PERMISSION_HINT}`)
+  }
+
+  const granted = await hasDownloadsPermission()
+  if (!granted) {
+    throw new Error(`Downloads permission not granted. ${PERMISSION_HINT}`)
+  }
+}
+
 async function ensureDebuggerAttached(tabId) {
+  const availability = await ensureDebuggerAvailable()
+  if (!availability.ok) {
+    return {
+      attached: false,
+      unavailableReason: availability.reason,
+      consoleMessages: [],
+      pageErrors: [],
+    }
+  }
+
   if (debuggerState.has(tabId)) return debuggerState.get(tabId)
 
   const state = { attached: false, consoleMessages: [], pageErrors: [] }
@@ -26,48 +136,52 @@ async function ensureDebuggerAttached(tabId) {
   return state
 }
 
-chrome.debugger.onEvent.addListener((source, method, params) => {
-  const state = debuggerState.get(source.tabId)
-  if (!state) return
-
-  if (method === "Runtime.consoleAPICalled") {
-    if (state.consoleMessages.length >= MAX_LOG_ENTRIES) {
-      state.consoleMessages.shift()
-    }
-    state.consoleMessages.push({
-      type: params.type,
-      text: params.args.map((a) => a.value ?? a.description ?? "").join(" "),
-      timestamp: Date.now(),
-      source: params.stackTrace?.callFrames?.[0]?.url,
-      line: params.stackTrace?.callFrames?.[0]?.lineNumber,
-    })
-  }
-
-  if (method === "Runtime.exceptionThrown") {
-    if (state.pageErrors.length >= MAX_LOG_ENTRIES) {
-      state.pageErrors.shift()
-    }
-    state.pageErrors.push({
-      message: params.exceptionDetails.text,
-      source: params.exceptionDetails.url,
-      line: params.exceptionDetails.lineNumber,
-      column: params.exceptionDetails.columnNumber,
-      stack: params.exceptionDetails.exception?.description,
-      timestamp: Date.now(),
-    })
-  }
-})
-
-chrome.debugger.onDetach.addListener((source, reason) => {
-  if (debuggerState.has(source.tabId)) {
+if (chrome.debugger?.onEvent) {
+  chrome.debugger.onEvent.addListener((source, method, params) => {
     const state = debuggerState.get(source.tabId)
-    state.attached = false
-  }
-})
+    if (!state) return
+
+    if (method === "Runtime.consoleAPICalled") {
+      if (state.consoleMessages.length >= MAX_LOG_ENTRIES) {
+        state.consoleMessages.shift()
+      }
+      state.consoleMessages.push({
+        type: params.type,
+        text: params.args.map((a) => a.value ?? a.description ?? "").join(" "),
+        timestamp: Date.now(),
+        source: params.stackTrace?.callFrames?.[0]?.url,
+        line: params.stackTrace?.callFrames?.[0]?.lineNumber,
+      })
+    }
+
+    if (method === "Runtime.exceptionThrown") {
+      if (state.pageErrors.length >= MAX_LOG_ENTRIES) {
+        state.pageErrors.shift()
+      }
+      state.pageErrors.push({
+        message: params.exceptionDetails.text,
+        source: params.exceptionDetails.url,
+        line: params.exceptionDetails.lineNumber,
+        column: params.exceptionDetails.columnNumber,
+        stack: params.exceptionDetails.exception?.description,
+        timestamp: Date.now(),
+      })
+    }
+  })
+}
+
+if (chrome.debugger?.onDetach) {
+  chrome.debugger.onDetach.addListener((source) => {
+    if (debuggerState.has(source.tabId)) {
+      const state = debuggerState.get(source.tabId)
+      state.attached = false
+    }
+  })
+}
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (debuggerState.has(tabId)) {
-    chrome.debugger.detach({ tabId }).catch(() => {})
+    if (chrome.debugger?.detach) chrome.debugger.detach({ tabId }).catch(() => {})
     debuggerState.delete(tabId)
   }
 })
@@ -76,17 +190,30 @@ chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.25 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
-    if (!isConnected) connect()
+    if (!isConnected) connect().catch(() => {})
   }
 })
 
-function connect() {
+async function connect() {
   if (port) {
     try {
       port.disconnect()
     } catch {}
     port = null
   }
+
+  const nativeMessagingAllowed = await hasNativeMessagingPermission()
+  if (!nativeMessagingAllowed) {
+    isConnected = false
+    updateBadge(false)
+    if (!nativePermissionHintLogged) {
+      nativePermissionHintLogged = true
+      console.log(`[OpenCode] Native messaging permission not granted. ${PERMISSION_HINT}`)
+    }
+    return
+  }
+
+  nativePermissionHintLogged = false
 
   try {
     port = chrome.runtime.connectNative(NATIVE_HOST_NAME)
@@ -202,13 +329,26 @@ async function getTabById(tabId) {
 }
 
 async function runInPage(tabId, command, args) {
-  const result = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: pageOps,
-    args: [command, args || {}],
-    world: "ISOLATED",
-  })
-  return result[0]?.result
+  const hasHostAccess = await hasHostAccessPermission()
+  if (!hasHostAccess) {
+    throw new Error(`Site access permission not granted. ${PERMISSION_HINT}`)
+  }
+
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: pageOps,
+      args: [command, args || {}],
+      world: "ISOLATED",
+    })
+    return result[0]?.result
+  } catch (error) {
+    const message = error?.message || String(error)
+    if (message.includes("Cannot access contents of the page")) {
+      throw new Error(`Site access permission not granted for this page. ${PERMISSION_HINT}`)
+    }
+    throw error
+  }
 }
 
 async function pageOps(command, args) {
@@ -1255,6 +1395,8 @@ async function toolDownload({
   const hasUrl = typeof url === "string" && url.trim()
   const hasSelector = typeof selector === "string" && selector.trim()
 
+  await ensureDownloadsAvailable()
+
   if (!hasUrl && !hasSelector) throw new Error("url or selector is required")
   if (hasUrl && hasSelector) throw new Error("Provide either url or selector, not both")
 
@@ -1288,6 +1430,8 @@ async function toolDownload({
 }
 
 async function toolListDownloads({ limit = 20, state } = {}) {
+  await ensureDownloadsAvailable()
+
   const limitValue = clampNumber(limit, 1, 200, 20)
   const query = { orderBy: ["-startTime"], limit: limitValue }
   if (typeof state === "string" && state.trim()) query.state = state.trim()
@@ -1352,7 +1496,7 @@ async function toolConsole({ tabId, clear = false, filter } = {}) {
     return {
       tabId: tab.id,
       content: JSON.stringify({
-        error: "Debugger not attached. DevTools may be open or another debugger is active.",
+        error: state.unavailableReason || "Debugger not attached. DevTools may be open or another debugger is active.",
         messages: [],
       }),
     }
@@ -1383,7 +1527,7 @@ async function toolErrors({ tabId, clear = false } = {}) {
     return {
       tabId: tab.id,
       content: JSON.stringify({
-        error: "Debugger not attached. DevTools may be open or another debugger is active.",
+        error: state.unavailableReason || "Debugger not attached. DevTools may be open or another debugger is active.",
         errors: [],
       }),
     }
@@ -1401,16 +1545,32 @@ async function toolErrors({ tabId, clear = false } = {}) {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => connect())
-chrome.runtime.onStartup.addListener(() => connect())
-chrome.action.onClicked.addListener(() => {
-  connect()
-  chrome.notifications.create({
-    type: "basic",
-    iconUrl: "icons/icon128.png",
-    title: "OpenCode Browser",
-    message: isConnected ? "Connected" : "Reconnecting...",
-  })
+chrome.runtime.onInstalled.addListener(() => connect().catch(() => {}))
+chrome.runtime.onStartup.addListener(() => connect().catch(() => {}))
+
+if (chrome.permissions?.onAdded) {
+  chrome.permissions.onAdded.addListener(() => connect().catch(() => {}))
+}
+
+chrome.action.onClicked.addListener(async () => {
+  const permissionResult = await requestOptionalPermissionsFromClick()
+  if (!permissionResult.granted) {
+    updateBadge(false)
+    if (permissionResult.error) {
+      console.warn("[OpenCode] Permission request failed:", permissionResult.error)
+    } else {
+      console.warn("[OpenCode] Permission request denied.")
+    }
+    return
+  }
+
+  if (permissionResult.requested) {
+    const requestedPermissions = permissionResult.permissions.join(", ") || "none"
+    const requestedOrigins = permissionResult.origins.join(", ") || "none"
+    console.log(`[OpenCode] Requested permissions -> permissions: ${requestedPermissions}; origins: ${requestedOrigins}`)
+  }
+
+  await connect()
 })
 
-connect()
+connect().catch(() => {})
