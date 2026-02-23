@@ -27,6 +27,8 @@
     "install": "node bin/cli.js install",
     "uninstall": "node bin/cli.js uninstall",
     "status": "node bin/cli.js status",
+    "tools": "node bin/cli.js tools",
+    "self-test": "node bin/cli.js self-test",
     "tool-test": "bun bin/tool-test.ts"
   },
   "keywords": [

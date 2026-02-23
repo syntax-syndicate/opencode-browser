@@ -23,7 +23,7 @@ import {
 } from "fs";
 import { homedir, platform } from "os";
 import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { createInterface } from "readline";
 import { createConnection } from "net";
 import { execSync, spawn } from "child_process";
@@ -326,6 +326,179 @@ function saveConfig(config) {
   writeFileSync(CONFIG_DST, JSON.stringify(config, null, 2) + "\n");
 }
 
+async function loadPluginTools() {
+  const pluginPath = join(PACKAGE_ROOT, "dist", "plugin.js");
+  if (!existsSync(pluginPath)) {
+    throw new Error("dist/plugin.js is missing. Run `bun run build` first.");
+  }
+
+  const mod = await import(pathToFileURL(pluginPath).href);
+  const factory = mod?.default;
+  if (typeof factory !== "function") {
+    throw new Error("Could not load plugin factory from dist/plugin.js");
+  }
+
+  const pluginInstance = await factory({});
+  const tools = pluginInstance?.tool;
+  if (!tools || typeof tools !== "object") {
+    throw new Error("Plugin did not expose any tools");
+  }
+  return tools;
+}
+
+function parseJsonArg(raw, fallback = {}) {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Expected JSON args. Received: ${raw}`);
+  }
+}
+
+function parseMaybeJson(value) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  if (!["{", "[", '"'].includes(trimmed[0])) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function getToolArgJson() {
+  const byFlag = getFlagValue("--args");
+  if (byFlag != null) return byFlag;
+  return process.argv[4] || null;
+}
+
+async function executeTool(toolName, args = {}) {
+  const tools = await loadPluginTools();
+  const tool = tools?.[toolName];
+  if (!tool || typeof tool.execute !== "function") {
+    const available = Object.keys(tools || {})
+      .sort()
+      .join(", ");
+    throw new Error(`Unknown tool: ${toolName}. Available: ${available}`);
+  }
+
+  return await tool.execute(args, {});
+}
+
+async function listTools() {
+  header("Browser Tools");
+  const tools = await loadPluginTools();
+  const names = Object.keys(tools).sort();
+  if (!names.length) {
+    warn("No tools found in plugin.");
+    return;
+  }
+
+  log(`Found ${names.length} tools:\n`);
+  for (const name of names) {
+    const description = tools[name]?.description || "(no description)";
+    log(`- ${name}: ${description}`);
+  }
+}
+
+async function runToolCommand() {
+  const toolName = process.argv[3];
+  if (!toolName) {
+    throw new Error("Usage: npx @different-ai/opencode-browser tool <toolName> [argsJson]");
+  }
+
+  const args = parseJsonArg(getToolArgJson(), {});
+  const result = await executeTool(toolName, args);
+
+  if (typeof result === "string") {
+    log(result);
+    return;
+  }
+  log(JSON.stringify(result, null, 2));
+}
+
+function asNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function readTabId(value) {
+  const parsed = parseMaybeJson(value);
+  if (parsed && Number.isFinite(parsed.tabId)) return parsed.tabId;
+  if (parsed?.content && Number.isFinite(parsed.content.tabId)) return parsed.content.tabId;
+  return null;
+}
+
+async function selfTest() {
+  header("CLI Self-Test");
+  log("Running extension-backed smoke test via plugin tools...");
+
+  const statusRaw = await executeTool("browser_status", {});
+  const status = parseMaybeJson(statusRaw);
+  if (!status || status.broker !== true || status.hostConnected !== true) {
+    throw new Error(
+      "browser_status indicates the extension is not connected. Run `npx @different-ai/opencode-browser install` and click the extension icon in Chrome."
+    );
+  }
+
+  const fixtureUrl = "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/examples/listbox-scrollable/";
+  const openRaw = await executeTool("browser_open_tab", { url: fixtureUrl, active: false });
+  const tabId = readTabId(openRaw);
+  if (!Number.isFinite(tabId)) {
+    throw new Error("Failed to read tabId from browser_open_tab output");
+  }
+  await executeTool("browser_wait", { ms: 250 });
+
+  const beforeRaw = await executeTool("browser_query", {
+    selector: "[role='listbox']",
+    mode: "property",
+    property: "scrollTop",
+    tabId,
+  });
+  const before = asNumber(parseMaybeJson(beforeRaw)?.value, 0);
+
+  await executeTool("browser_click", {
+    selector: "text:Neptunium",
+    tabId,
+    timeoutMs: 3000,
+    pollMs: 150,
+  });
+
+  const selectedRaw = await executeTool("browser_query", {
+    selector: "[aria-selected='true']",
+    mode: "text",
+    tabId,
+  });
+  const selectedText = String(parseMaybeJson(selectedRaw) || "");
+  if (!selectedText.toLowerCase().includes("neptunium")) {
+    throw new Error(`Click verification failed. Expected selected text to include Neptunium, got: ${selectedText}`);
+  }
+
+  await executeTool("browser_scroll", {
+    selector: "[role='listbox']",
+    y: 320,
+    tabId,
+    timeoutMs: 2000,
+    pollMs: 100,
+  });
+  await executeTool("browser_wait", { ms: 250 });
+
+  const afterRaw = await executeTool("browser_query", {
+    selector: "[role='listbox']",
+    mode: "property",
+    property: "scrollTop",
+    tabId,
+  });
+  const after = asNumber(parseMaybeJson(afterRaw)?.value, 0);
+
+  if (after <= before) {
+    throw new Error(`Scroll verification failed. Expected scrollTop to increase (before=${before}, after=${after}).`);
+  }
+
+  success("Self-test passed: click + selector text + container scroll are working.");
+}
+
 async function main() {
   const command = process.argv[2];
 
@@ -338,6 +511,12 @@ ${color("cyan", "Browser automation plugin (native messaging + per-tab ownership
     await install();
   } else if (command === "update") {
     await update();
+  } else if (command === "tools") {
+    await listTools();
+  } else if (command === "tool") {
+    await runToolCommand();
+  } else if (command === "self-test") {
+    await selfTest();
   } else if (command === "uninstall") {
     await uninstall();
   } else if (command === "status") {
@@ -353,11 +532,15 @@ ${color("bright", "Usage:")}
   npx @different-ai/opencode-browser update
   npx @different-ai/opencode-browser status
   npx @different-ai/opencode-browser uninstall
+  npx @different-ai/opencode-browser tools
+  npx @different-ai/opencode-browser tool <toolName> [argsJson]
+  npx @different-ai/opencode-browser self-test
   npx @different-ai/opencode-browser agent-install
   npx @different-ai/opencode-browser agent-gateway
 
 ${color("bright", "Options:")}
   --extension-id <id> (or OPENCODE_BROWSER_EXTENSION_ID)
+  --args '{"selector":"text:Inbox"}' (for tool command)
 
 ${color("bright", "Quick Start:")}
   1. Run: npx @different-ai/opencode-browser install
@@ -372,6 +555,7 @@ ${color("bright", "Agent Mode:")}
   }
 
   rl.close();
+  process.exit(0);
 }
 
 async function install() {

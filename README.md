@@ -58,6 +58,25 @@ Your `opencode.json` or `opencode.jsonc` should contain:
 bunx @different-ai/opencode-browser@latest update
 ```
 
+## CLI tool runner (for local debugging)
+
+Run plugin tools directly from the package CLI (without starting an OpenCode session):
+
+```bash
+# list available browser_* tools
+npx @different-ai/opencode-browser tools
+
+# run a single tool
+npx @different-ai/opencode-browser tool browser_status
+npx @different-ai/opencode-browser tool browser_query --args '{"mode":"page_text"}'
+
+# run built-in end-to-end smoke test (click + text selector + container scroll)
+npx @different-ai/opencode-browser self-test
+```
+
+This is useful for debugging issue reports (for example inbox/chat UIs) before involving a full OpenCode workflow.
+After `update`, reload the unpacked extension in `chrome://extensions` before running `self-test`.
+
 ## Chrome Web Store maintainer flow
 
 Build a store-ready extension package:
