@@ -24,6 +24,8 @@ This version is optimized for reliability and predictable multi-session behavior
 bunx @different-ai/opencode-browser@latest install
 ```
 
+Supports macOS, Linux, and Windows (Chrome/Edge/Brave/Chromium).
+
 
 https://github.com/user-attachments/assets/d5767362-fbf3-4023-858b-90f06d9f0b25
 

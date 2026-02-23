@@ -21,12 +21,12 @@ import {
   unlinkSync,
   chmodSync,
 } from "fs";
-import { homedir, platform } from "os";
+import { homedir, platform, userInfo } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline";
 import { createConnection } from "net";
-import { execSync, spawn } from "child_process";
+import { execSync, spawn, spawnSync } from "child_process";
 import { createHash } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -38,11 +38,15 @@ const EXTENSION_DIR = join(BASE_DIR, "extension");
 const EXTENSION_MANIFEST_PATH = join(PACKAGE_ROOT, "extension", "manifest.json");
 const BROKER_DST = join(BASE_DIR, "broker.cjs");
 const NATIVE_HOST_DST = join(BASE_DIR, "native-host.cjs");
-const NATIVE_HOST_WRAPPER = join(BASE_DIR, "host-wrapper.sh");
 const CONFIG_DST = join(BASE_DIR, "config.json");
-const BROKER_SOCKET = join(BASE_DIR, "broker.sock");
 
 const NATIVE_HOST_NAME = "com.opencode.browser_automation";
+const OS_NAME = platform();
+const NATIVE_HOST_WRAPPER = join(
+  BASE_DIR,
+  OS_NAME === "win32" ? "host-wrapper.cmd" : "host-wrapper.sh"
+);
+const BROKER_SOCKET = getBrokerSocketPath();
 
 const COLORS = {
   reset: "\x1b[0m",
@@ -55,6 +59,56 @@ const COLORS = {
 
 function color(c, text) {
   return `${COLORS[c]}${text}${COLORS.reset}`;
+}
+
+function isWindows() {
+  return OS_NAME === "win32";
+}
+
+function getSafePipeName() {
+  try {
+    const username = userInfo().username || "user";
+    return `opencode-browser-${username}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+  } catch {
+    return "opencode-browser";
+  }
+}
+
+function getBrokerSocketPath() {
+  const override = process.env.OPENCODE_BROWSER_BROKER_SOCKET;
+  if (override) return override;
+  if (OS_NAME === "win32") return `\\\\.\\pipe\\${getSafePipeName()}`;
+  return join(BASE_DIR, "broker.sock");
+}
+
+function getWindowsRegistryTargets() {
+  return [
+    { name: "Chrome", key: "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts" },
+    { name: "Chromium", key: "HKCU\\Software\\Chromium\\NativeMessagingHosts" },
+    { name: "Brave", key: "HKCU\\Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts" },
+    { name: "Edge", key: "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts" },
+  ];
+}
+
+function runRegCommand(args) {
+  try {
+    const result = spawnSync("reg", args, { stdio: "ignore" });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function queryRegistryDefaultValue(key) {
+  try {
+    const result = spawnSync("reg", ["query", key, "/ve"], { encoding: "utf8" });
+    if (result.status !== 0) return null;
+    const output = String(result.stdout || "");
+    const match = output.match(/REG_SZ\s+(.+)\s*$/m);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function log(msg) {
@@ -180,7 +234,8 @@ function resolveNodePath() {
   if (process.env.OPENCODE_BROWSER_NODE) return process.env.OPENCODE_BROWSER_NODE;
   if (process.execPath && /node(\.exe)?$/.test(process.execPath)) return process.execPath;
   try {
-    const output = execSync("which node", { stdio: ["ignore", "pipe", "ignore"] })
+    const command = isWindows() ? "where node" : "which node";
+    const output = execSync(command, { stdio: ["ignore", "pipe", "ignore"] })
       .toString("utf8")
       .trim();
     if (output) return output;
@@ -190,6 +245,11 @@ function resolveNodePath() {
 
 function writeHostWrapper(nodePath) {
   ensureDir(BASE_DIR);
+  if (isWindows()) {
+    const script = `@echo off\r\n"${nodePath}" "${NATIVE_HOST_DST}"\r\n`;
+    writeFileSync(NATIVE_HOST_WRAPPER, script);
+    return NATIVE_HOST_WRAPPER;
+  }
   const script = `#!/bin/sh\n"${nodePath}" "${NATIVE_HOST_DST}"\n`;
   writeFileSync(NATIVE_HOST_WRAPPER, script, { mode: 0o755 });
   chmodSync(NATIVE_HOST_WRAPPER, 0o755);
@@ -276,6 +336,7 @@ function copyDirRecursive(srcDir, destDir) {
 }
 
 function getNativeHostDirs(osName) {
+  if (osName === "win32") return [];
   if (osName === "darwin") {
     const base = join(homedir(), "Library", "Application Support");
     return [
@@ -310,6 +371,58 @@ function writeNativeHostManifest(dir, extensionId, hostPath) {
   };
 
   writeFileSync(nativeHostManifestPath(dir), JSON.stringify(manifest, null, 2) + "\n");
+}
+
+function writeWindowsNativeHostManifest(extensionId, hostPath) {
+  const manifestPath = nativeHostManifestPath(BASE_DIR);
+  writeNativeHostManifest(BASE_DIR, extensionId, hostPath);
+  return manifestPath;
+}
+
+function registerWindowsNativeHost(manifestPath) {
+  for (const target of getWindowsRegistryTargets()) {
+    const key = `${target.key}\\${NATIVE_HOST_NAME}`;
+    const ok = runRegCommand(["add", key, "/ve", "/t", "REG_SZ", "/d", manifestPath, "/f"]);
+    if (ok) {
+      success(`Registered native host for ${target.name}: ${key}`);
+    } else {
+      warn(`Could not register native host for ${target.name}: ${key}`);
+    }
+  }
+}
+
+function unregisterWindowsNativeHost() {
+  for (const target of getWindowsRegistryTargets()) {
+    const key = `${target.key}\\${NATIVE_HOST_NAME}`;
+    const ok = runRegCommand(["delete", key, "/f"]);
+    if (ok) {
+      success(`Removed native host registry: ${key}`);
+    } else {
+      warn(`Could not remove native host registry: ${key}`);
+    }
+  }
+}
+
+function reportWindowsNativeHostStatus() {
+  const manifestPath = nativeHostManifestPath(BASE_DIR);
+  if (existsSync(manifestPath)) {
+    success(`Native host manifest: ${manifestPath}`);
+  } else {
+    warn(`Native host manifest missing: ${manifestPath}`);
+  }
+
+  let foundAny = false;
+  for (const target of getWindowsRegistryTargets()) {
+    const key = `${target.key}\\${NATIVE_HOST_NAME}`;
+    const value = queryRegistryDefaultValue(key);
+    if (value) {
+      foundAny = true;
+      success(`Registry (${target.name}): ${key}`);
+    }
+  }
+  if (!foundAny) {
+    warn("No native host registry entries found. Run: npx @different-ai/opencode-browser install");
+  }
 }
 
 function loadConfig() {
@@ -377,13 +490,13 @@ ${color("bright", "Agent Mode:")}
 async function install() {
   header("Step 1: Check Platform");
 
-  const osName = platform();
-  if (osName !== "darwin" && osName !== "linux") {
+  const osName = OS_NAME;
+  if (osName !== "darwin" && osName !== "linux" && osName !== "win32") {
     error(`Unsupported platform: ${osName}`);
-    error("OpenCode Browser currently supports macOS and Linux only.");
+    error("OpenCode Browser currently supports macOS, Linux, and Windows only.");
     process.exit(1);
   }
-  success(`Platform: ${osName === "darwin" ? "macOS" : "Linux"}`);
+  success(`Platform: ${osName === "darwin" ? "macOS" : osName === "win32" ? "Windows" : "Linux"}`);
 
   header("Step 2: Copy Extension Files");
 
@@ -472,13 +585,19 @@ Find it at ${color("cyan", "chrome://extensions")}:
 
   header("Step 6: Register Native Messaging Host");
 
-  const hostDirs = getNativeHostDirs(osName);
-  for (const dir of hostDirs) {
-    try {
-      writeNativeHostManifest(dir, extensionId, hostPath);
-      success(`Wrote native host manifest: ${nativeHostManifestPath(dir)}`);
-    } catch (e) {
-      warn(`Could not write native host manifest to: ${dir}`);
+  if (osName === "win32") {
+    const manifestPath = writeWindowsNativeHostManifest(extensionId, hostPath);
+    success(`Wrote native host manifest: ${manifestPath}`);
+    registerWindowsNativeHost(manifestPath);
+  } else {
+    const hostDirs = getNativeHostDirs(osName);
+    for (const dir of hostDirs) {
+      try {
+        writeNativeHostManifest(dir, extensionId, hostPath);
+        success(`Wrote native host manifest: ${nativeHostManifestPath(dir)}`);
+      } catch (e) {
+        warn(`Could not write native host manifest to: ${dir}`);
+      }
     }
   }
 
@@ -509,9 +628,13 @@ Find it at ${color("cyan", "chrome://extensions")}:
     return jsonPath;
   }
 
+  const globalConfigLabel =
+    osName === "win32"
+      ? "2) Global (%USERPROFILE%\\.config\\opencode\\opencode.json)"
+      : "2) Global (~/.config/opencode/opencode.json)";
   const configOptions = [
     "1) Project (./opencode.json or opencode.jsonc)",
-    "2) Global (~/.config/opencode/opencode.json)",
+    globalConfigLabel,
     "3) Custom path",
     "4) Skip (does nothing)",
   ];
@@ -526,8 +649,12 @@ Find it at ${color("cyan", "chrome://extensions")}:
     configDir = process.cwd();
     configPath = findOpenCodeConfigPath(configDir);
   } else if (selection === "2") {
-    const xdgConfig = process.env.XDG_CONFIG_HOME;
-    configDir = xdgConfig ? join(xdgConfig, "opencode") : join(homedir(), ".config", "opencode");
+    if (osName === "win32") {
+      configDir = join(homedir(), ".config", "opencode");
+    } else {
+      const xdgConfig = process.env.XDG_CONFIG_HOME;
+      configDir = xdgConfig ? join(xdgConfig, "opencode") : join(homedir(), ".config", "opencode");
+    }
     configPath = findOpenCodeConfigPath(configDir);
   } else if (selection === "3") {
     const customPath = await ask("Enter full path to opencode.json or opencode.jsonc: ");
@@ -660,13 +787,13 @@ Open Chrome and:
 async function update() {
   header("Update: Check Platform");
 
-  const osName = platform();
-  if (osName !== "darwin" && osName !== "linux") {
+  const osName = OS_NAME;
+  if (osName !== "darwin" && osName !== "linux" && osName !== "win32") {
     error(`Unsupported platform: ${osName}`);
-    error("OpenCode Browser currently supports macOS and Linux only.");
+    error("OpenCode Browser currently supports macOS, Linux, and Windows only.");
     process.exit(1);
   }
-  success(`Platform: ${osName === "darwin" ? "macOS" : "Linux"}`);
+  success(`Platform: ${osName === "darwin" ? "macOS" : osName === "win32" ? "Windows" : "Linux"}`);
 
   header("Step 1: Copy Extension Files");
 
@@ -743,13 +870,19 @@ Find it at ${color("cyan", "chrome://extensions")}:
 
   header("Step 4: Register Native Messaging Host");
 
-  const hostDirs = getNativeHostDirs(osName);
-  for (const dir of hostDirs) {
-    try {
-      writeNativeHostManifest(dir, extensionId, hostPath);
-      success(`Wrote native host manifest: ${nativeHostManifestPath(dir)}`);
-    } catch {
-      warn(`Could not write native host manifest to: ${dir}`);
+  if (osName === "win32") {
+    const manifestPath = writeWindowsNativeHostManifest(extensionId, hostPath);
+    success(`Wrote native host manifest: ${manifestPath}`);
+    registerWindowsNativeHost(manifestPath);
+  } else {
+    const hostDirs = getNativeHostDirs(osName);
+    for (const dir of hostDirs) {
+      try {
+        writeNativeHostManifest(dir, extensionId, hostPath);
+        success(`Wrote native host manifest: ${nativeHostManifestPath(dir)}`);
+      } catch {
+        warn(`Could not write native host manifest to: ${dir}`);
+      }
     }
   }
 
@@ -770,6 +903,7 @@ async function status() {
   success(`Broker installed: ${existsSync(BROKER_DST)}`);
   success(`Native host installed: ${existsSync(NATIVE_HOST_DST)}`);
   success(`Host wrapper installed: ${existsSync(NATIVE_HOST_WRAPPER)}`);
+  success(`Broker socket: ${BROKER_SOCKET}`);
 
   const cfg = loadConfig();
   if (cfg?.extensionId) {
@@ -787,18 +921,29 @@ async function status() {
     success(`Node path: ${cfg.nodePath}`);
   }
 
-  const osName = platform();
-  const hostDirs = getNativeHostDirs(osName);
-  let foundAny = false;
-  for (const dir of hostDirs) {
-    const p = nativeHostManifestPath(dir);
-    if (existsSync(p)) {
-      foundAny = true;
-      success(`Native host manifest: ${p}`);
+  const osName = OS_NAME;
+  if (osName === "win32") {
+    reportWindowsNativeHostStatus();
+  } else {
+    const hostDirs = getNativeHostDirs(osName);
+    let foundAny = false;
+    for (const dir of hostDirs) {
+      const p = nativeHostManifestPath(dir);
+      if (existsSync(p)) {
+        foundAny = true;
+        success(`Native host manifest: ${p}`);
+      }
+    }
+    if (!foundAny) {
+      warn("No native host manifest found. Run: npx @different-ai/opencode-browser install");
     }
   }
-  if (!foundAny) {
-    warn("No native host manifest found. Run: npx @different-ai/opencode-browser install");
+
+  const brokerStatus = await getBrokerStatus(1000);
+  if (brokerStatus.ok) {
+    success(`Broker status: ok (hostConnected=${!!brokerStatus.data?.hostConnected})`);
+  } else {
+    warn(`Broker status: ${brokerStatus.error || "unavailable"}`);
   }
 }
 
@@ -830,20 +975,34 @@ async function agentGateway() {
 async function uninstall() {
   header("Uninstall");
 
-  const osName = platform();
-  const hostDirs = getNativeHostDirs(osName);
-  for (const dir of hostDirs) {
-    const p = nativeHostManifestPath(dir);
-    if (!existsSync(p)) continue;
-    try {
-      unlinkSync(p);
-      success(`Removed native host manifest: ${p}`);
-    } catch {
-      warn(`Could not remove: ${p}`);
+  const osName = OS_NAME;
+  if (osName === "win32") {
+    unregisterWindowsNativeHost();
+    const manifestPath = nativeHostManifestPath(BASE_DIR);
+    if (existsSync(manifestPath)) {
+      try {
+        unlinkSync(manifestPath);
+        success(`Removed native host manifest: ${manifestPath}`);
+      } catch {
+        warn(`Could not remove: ${manifestPath}`);
+      }
+    }
+  } else {
+    const hostDirs = getNativeHostDirs(osName);
+    for (const dir of hostDirs) {
+      const p = nativeHostManifestPath(dir);
+      if (!existsSync(p)) continue;
+      try {
+        unlinkSync(p);
+        success(`Removed native host manifest: ${p}`);
+      } catch {
+        warn(`Could not remove: ${p}`);
+      }
     }
   }
 
-  for (const p of [BROKER_DST, NATIVE_HOST_DST, CONFIG_DST, join(BASE_DIR, "broker.sock")]) {
+  const unixSocketPath = join(BASE_DIR, "broker.sock");
+  for (const p of [BROKER_DST, NATIVE_HOST_DST, CONFIG_DST, unixSocketPath, BROKER_SOCKET]) {
     if (!existsSync(p)) continue;
     try {
       unlinkSync(p);

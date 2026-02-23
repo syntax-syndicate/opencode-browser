@@ -13108,8 +13108,8 @@ function createAgentBackend(sessionId) {
 }
 
 // src/plugin.ts
-import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync2, statSync } from "fs";
-import { homedir as homedir2 } from "os";
+import { appendFileSync, existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync2, statSync } from "fs";
+import { homedir as homedir2, userInfo } from "os";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join2, resolve as resolve2 } from "path";
 import { spawn as spawn2 } from "child_process";
 import { fileURLToPath } from "url";
@@ -13132,8 +13132,32 @@ function getPackageVersion() {
 }
 var { schema } = tool;
 var BASE_DIR2 = join2(homedir2(), ".opencode-browser");
-var SOCKET_PATH = join2(BASE_DIR2, "broker.sock");
+var SOCKET_PATH = getBrokerSocketPath();
+var LOG_PATH = join2(BASE_DIR2, "plugin.log");
+function getSafePipeName() {
+  try {
+    const username = userInfo().username || "user";
+    return `opencode-browser-${username}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+  } catch {
+    return "opencode-browser";
+  }
+}
+function getBrokerSocketPath() {
+  const override = process.env.OPENCODE_BROWSER_BROKER_SOCKET;
+  if (override)
+    return override;
+  if (process.platform === "win32")
+    return `\\\\.\\pipe\\${getSafePipeName()}`;
+  return join2(BASE_DIR2, "broker.sock");
+}
 mkdirSync2(BASE_DIR2, { recursive: true });
+function logDebug(message) {
+  try {
+    appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${message}
+`, "utf8");
+  } catch {}
+}
+logDebug(`plugin loaded v${getPackageVersion()} pid=${process.pid} socket=${SOCKET_PATH}`);
 var DEFAULT_MAX_UPLOAD_BYTES = 512 * 1024;
 var MAX_UPLOAD_BYTES = (() => {
   const raw = process.env.OPENCODE_BROWSER_MAX_UPLOAD_BYTES;
@@ -13197,7 +13221,11 @@ async function connectToBroker() {
   return await new Promise((resolve3, reject) => {
     const socket = net2.createConnection(SOCKET_PATH);
     socket.once("connect", () => resolve3(socket));
-    socket.once("error", (err) => reject(err));
+    socket.once("error", (err) => {
+      lastBrokerError = err instanceof Error ? err : new Error(String(err));
+      logDebug(`broker connect error socket=${SOCKET_PATH} error=${lastBrokerError.message}`);
+      reject(err);
+    });
   });
 }
 async function sleep2(ms) {
@@ -13206,6 +13234,7 @@ async function sleep2(ms) {
 var BACKEND_MODE = (process.env.OPENCODE_BROWSER_BACKEND ?? process.env.OPENCODE_BROWSER_MODE ?? "extension").toLowerCase().trim();
 var USE_AGENT_BACKEND = ["agent", "agent-browser", "agentbrowser"].includes(BACKEND_MODE);
 var socket = null;
+var lastBrokerError = null;
 var sessionId = Math.random().toString(36).slice(2);
 var reqId = 0;
 var pending = new Map;
@@ -13226,9 +13255,11 @@ async function ensureBrokerSocket() {
     }
   }
   if (!socket || socket.destroyed) {
-    throw new Error("Could not connect to local broker. Run `npx @different-ai/opencode-browser install` and ensure the extension is loaded.");
+    const errorMessage = lastBrokerError?.message ? ` (${lastBrokerError.message})` : "";
+    throw new Error(`Could not connect to local broker at ${SOCKET_PATH}${errorMessage}. ` + "Run `npx @different-ai/opencode-browser install` and ensure the extension is loaded.");
   }
   socket.setNoDelay(true);
+  logDebug(`broker connected socket=${SOCKET_PATH}`);
   socket.on("data", createJsonLineParser2((msg) => {
     if (msg?.type !== "response" || typeof msg.id !== "number")
       return;
@@ -13309,25 +13340,20 @@ var plugin = async (ctx) => {
         description: "Debug plugin loading and connection status.",
         args: {},
         async execute(args, ctx2) {
-          if (ctx2?.client?.app?.log) {
-            await ctx2.client.app.log({
-              service: "opencode-browser",
-              level: "info",
-              message: "browser_debug called",
-              extra: { sessionId, pid: process.pid }
-            });
-          }
-          return JSON.stringify({
-            loaded: true,
-            sessionId,
-            pid: process.pid,
-            backend: USE_AGENT_BACKEND ? "agent-browser" : "extension",
-            agentSession: agentBackend?.session ?? null,
-            agentConnection: agentBackend?.connection ?? null,
-            agentBrowserVersion: agentBackend?.getVersion?.() ?? null,
-            pluginVersion: getPackageVersion(),
-            timestamp: new Date().toISOString()
-          });
+          const lines = [
+            "loaded: true",
+            `sessionId: ${sessionId}`,
+            `pid: ${process.pid}`,
+            `backend: ${USE_AGENT_BACKEND ? "agent-browser" : "extension"}`,
+            `brokerSocket: ${SOCKET_PATH}`,
+            `agentSession: ${agentBackend?.session ?? ""}`,
+            `agentConnection: ${JSON.stringify(agentBackend?.connection ?? null)}`,
+            `agentBrowserVersion: ${agentBackend?.getVersion?.() ?? ""}`,
+            `pluginVersion: ${getPackageVersion()}`,
+            `timestamp: ${new Date().toISOString()}`
+          ];
+          return lines.join(`
+`);
         }
       }),
       browser_version: tool({

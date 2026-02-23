@@ -11,8 +11,24 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const BASE_DIR = path.join(os.homedir(), ".opencode-browser");
-const SOCKET_PATH = path.join(BASE_DIR, "broker.sock");
+const SOCKET_PATH = getBrokerSocketPath();
 const BROKER_PATH = path.join(BASE_DIR, "broker.cjs");
+
+function getSafePipeName() {
+  try {
+    const username = os.userInfo().username || "user";
+    return `opencode-browser-${username}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+  } catch {
+    return "opencode-browser";
+  }
+}
+
+function getBrokerSocketPath() {
+  const override = process.env.OPENCODE_BROWSER_BROKER_SOCKET;
+  if (override) return override;
+  if (process.platform === "win32") return `\\\\.\\pipe\\${getSafePipeName()}`;
+  return path.join(BASE_DIR, "broker.sock");
+}
 
 fs.mkdirSync(BASE_DIR, { recursive: true });
 
