@@ -522,7 +522,7 @@ async function pageOps(command, args) {
     const results = []
     const seen = new Set()
     const candidates = deepQuerySelectorAll(
-      "button, a, label, option, summary, [role='button'], [role='link'], [role='tab'], [role='menuitem']",
+      "button, a, label, option, summary, [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='option'], [role='listitem'], [role='row'], [tabindex]",
       document
     )
     for (const el of candidates) {
@@ -532,6 +532,23 @@ async function pageOps(command, args) {
         results.push(el)
       }
     }
+
+    const generic = deepQuerySelectorAll("div, span, li, article", document)
+    for (const el of generic) {
+      if (!matchesText(el.innerText || el.textContent || "", target)) continue
+      const style = window.getComputedStyle(el)
+      const likelyInteractive =
+        !!el.getAttribute("onclick") ||
+        !!el.getAttribute("role") ||
+        el.tabIndex >= 0 ||
+        style.cursor === "pointer"
+      if (!likelyInteractive) continue
+      if (!seen.has(el)) {
+        seen.add(el)
+        results.push(el)
+      }
+    }
+
     const inputs = deepQuerySelectorAll("input[type='button'], input[type='submit'], input[type='reset']", document)
     for (const el of inputs) {
       if (!matchesText(el.value || "", target)) continue
@@ -891,6 +908,21 @@ async function pageOps(command, args) {
       if (!match.chosen) {
         return { ok: false, error: `Element not found for selectors: ${selectors.join(", ")}` }
       }
+      if (scrollX || scrollY) {
+        try {
+          if (typeof match.chosen.scrollBy === "function") {
+            match.chosen.scrollBy({ left: scrollX, top: scrollY, behavior: "smooth" })
+          } else {
+            match.chosen.scrollLeft = Number(match.chosen.scrollLeft || 0) + scrollX
+            match.chosen.scrollTop = Number(match.chosen.scrollTop || 0) + scrollY
+          }
+        } catch {
+          match.chosen.scrollLeft = Number(match.chosen.scrollLeft || 0) + scrollX
+          match.chosen.scrollTop = Number(match.chosen.scrollTop || 0) + scrollY
+        }
+        return { ok: true, selectorUsed: match.selectorUsed, elementScroll: { x: scrollX, y: scrollY } }
+      }
+
       try {
         match.chosen.scrollIntoView({ behavior: "smooth", block: "center" })
       } catch {}
